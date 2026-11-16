@@ -135,7 +135,7 @@ function renderSignIn() {
         <button class="btn primary block">Email me a link</button>
       </form>
       <div id="sent" hidden>
-        <p>Check your email and tap <b>Log In</b>. It opens PS Health signed in.</p>
+        <p>Check your email and tap <b>Log In</b>. It opens PS Fit signed in.</p>
         <p class="small muted">Use this same phone. Didn't get it? Check spam, or <button type="button" class="link" id="resend">send again</button>.</p>
       </div>
     </div>`;
@@ -797,7 +797,7 @@ function showInstallBar() {
   const slot = $("#install-slot");
   if (!slot || !deferredInstall || standalone()) return;
   try { if (localStorage.getItem("psh-install-x")) return; } catch {}
-  slot.innerHTML = `<div class="install-bar"><span><b>Install PS Health</b>Logging and check-ins from your home screen</span>
+  slot.innerHTML = `<div class="install-bar"><span><b>Install PS Fit</b>Logging and check-ins from your home screen</span>
     <button class="btn primary" id="inst">Install</button><button class="x" id="inst-x" aria-label="Not now">×</button></div>`;
   $("#inst").addEventListener("click", async () => { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; slot.innerHTML = ""; });
   $("#inst-x").addEventListener("click", () => { try { localStorage.setItem("psh-install-x", "1"); } catch {} slot.innerHTML = ""; });
@@ -834,7 +834,7 @@ async function enter(session) {
   const { data: owner, error } = await db.rpc("claim_owner");
   if (error || !owner) {
     $("#tabs").hidden = true;
-    app.innerHTML = `<p class="empty">This PS Health belongs to someone else.</p><button class="btn ghost block" id="out">Sign out</button>`;
+    app.innerHTML = `<p class="empty">This PS Fit belongs to someone else.</p><button class="btn ghost block" id="out">Sign out</button>`;
     $("#out").addEventListener("click", () => db.auth.signOut());
     return;
   }

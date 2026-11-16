@@ -1,6 +1,6 @@
 // App shell cache + push notifications.
-const CACHE = "psh-v2";
-const SHELL = ["./", "index.html", "styles.css?v=2", "app.js?v=2", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
+const CACHE = "psh-v3";
+const SHELL = ["./", "index.html", "styles.css?v=3", "app.js?v=3", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -31,9 +31,9 @@ self.addEventListener("fetch", (e) => {
 
 self.addEventListener("push", (e) => {
   let data = {};
-  try { data = e.data ? e.data.json() : {}; } catch { data = { title: "PS Health", body: e.data?.text() }; }
+  try { data = e.data ? e.data.json() : {}; } catch { data = { title: "PS Fit", body: e.data?.text() }; }
   e.waitUntil(
-    self.registration.showNotification(data.title || "PS Health", {
+    self.registration.showNotification(data.title || "PS Fit", {
       body: data.body || "",
       icon: "icons/icon-192.png",
       badge: "icons/badge-96.png",

@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "PS Health",
-  "short_name": "PS Health",
+  "name": "PS Fit",
+  "short_name": "PS Fit",
   "description": "What I eat, and how it makes me feel.",
   "start_url": "./",
   "scope": "./",

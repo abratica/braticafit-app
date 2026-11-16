@@ -1,4 +1,4 @@
-project_id = "ps-health"
+project_id = "ps-fit"
 
 [functions.api]
 verify_jwt = false

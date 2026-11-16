@@ -21,7 +21,7 @@ export async function lookupBarcode(code: string) {
   if (clean.length < 6 || clean.length > 14) return { error: "bad_code" };
 
   const url = `https://world.openfoodfacts.org/api/v2/product/${clean}.json?fields=product_name,product_name_en,brands,serving_size,serving_quantity,nutriments,image_front_small_url`;
-  const res = await fetch(url, { headers: { "User-Agent": "PSHealth/1.0 (personal food log; abratica.github.io/ps-health)" } });
+  const res = await fetch(url, { headers: { "User-Agent": "PSFit/1.0 (personal food log; abratica.github.io/ps-fit)" } });
   if (res.status === 404) return { error: "not_found", barcode: clean };
   if (!res.ok) throw new Error(`Open Food Facts ${res.status}`);
   const data = await res.json();

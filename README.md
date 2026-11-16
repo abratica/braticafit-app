@@ -1,4 +1,4 @@
-# PS Health
+# PS Fit
 
 A personal food and nutrition app: snap or type what you eat, save it to a foods list for one-tap logging,
 answer a quick energy/stomach check-in about two hours later, and get a Sunday summary plus pattern alerts.
