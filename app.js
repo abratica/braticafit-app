@@ -125,18 +125,19 @@ $("#theme").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 function renderSignIn() {
   $("#tabs").hidden = true;
-  $("#sub").textContent = "What you eat, and how it makes you feel";
+  document.body.classList.add("signin");
   app.innerHTML = `
-    <div class="card">
-      <h2>Sign in</h2>
-      <p class="muted small">Enter your email and we'll send you a sign-in link.</p>
-      <form id="f-email">
-        <label class="field"><span>Email</span><input class="input" id="email" type="email" autocomplete="email" required></label>
-        <button class="btn primary block">Email me a link</button>
+    <div class="auth">
+      <img class="auth-logo" src="icons/logo.webp" alt="PS Fit Coaching" width="280" height="280">
+      <form id="f-email" class="auth-form">
+        <label class="auth-label" for="email">Email</label>
+        <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required>
+        <button class="auth-btn">Send my sign-in link</button>
       </form>
-      <div id="sent" hidden>
-        <p>Check your email and tap <b>Log In</b>. It opens PS Fit signed in.</p>
-        <p class="small muted">Use this same phone. Didn't get it? Check spam, or <button type="button" class="link" id="resend">send again</button>.</p>
+      <div id="sent" class="auth-sent" hidden>
+        <p class="auth-head">Check your email</p>
+        <p>Tap <b>Log In</b> in the email. It opens PS Fit signed in.</p>
+        <p class="auth-fine">Use this same phone. Didn't get it? Check spam, or <button type="button" class="auth-link" id="resend">send again</button>.</p>
       </div>
     </div>`;
   const send = async () => {
@@ -831,6 +832,7 @@ navigator.serviceWorker?.addEventListener("message", (e) => {
 async function enter(session) {
   user = session?.user ?? null;
   if (!user) return renderSignIn();
+  document.body.classList.remove("signin");
   const { data: owner, error } = await db.rpc("claim_owner");
   if (error || !owner) {
     $("#tabs").hidden = true;

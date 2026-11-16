@@ -194,3 +194,45 @@ h3 { font: 600 13px/1.2 Inter, sans-serif; text-transform: uppercase; letter-spa
 .scan-box video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .scan-line { position: absolute; left: 12%; right: 12%; top: 50%; height: 2px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 .scan-box::after { content: ""; position: absolute; inset: 22% 10%; border: 2px solid rgba(255,255,255,.8); border-radius: 10px; }
+
+/* ---------- Sign-in (PS Fit Coaching brand) ---------- */
+body.signin {
+  --brand: #fb4311; --brand-ink: #ffffff; --chalk: #f2efe9;
+  background-color: #0d0d0d;
+  background-image:
+    radial-gradient(ellipse at 50% 30%, rgba(255,255,255,.05), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  color: var(--chalk); padding-bottom: 0; min-height: 100vh;
+}
+body.signin .top { display: none; }
+.auth {
+  min-height: 100vh; min-height: 100dvh; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: calc(24px + env(safe-area-inset-top)) 24px calc(32px + env(safe-area-inset-bottom));
+  max-width: 400px; margin: 0 auto; text-align: center;
+}
+.auth-logo { width: min(280px, 70vw); height: auto; filter: drop-shadow(0 10px 30px rgba(251,67,17,.18)); margin-bottom: 36px; }
+.auth-form, .auth-sent { width: 100%; text-align: left; }
+.auth-label, .auth-head {
+  display: block; font: 600 13px/1 Oswald, Inter, sans-serif; letter-spacing: .22em; text-transform: uppercase;
+  color: rgba(242,239,233,.7); margin: 0 0 10px;
+}
+.auth-head { font-size: 20px; letter-spacing: .12em; color: var(--chalk); margin-bottom: 12px; }
+.auth-input {
+  width: 100%; box-sizing: border-box; height: 54px; padding: 0 16px; border-radius: 12px;
+  background: rgba(255,255,255,.06); border: 1.5px solid rgba(255,255,255,.14); color: var(--chalk);
+  outline: none; transition: border-color .15s, background .15s;
+}
+.auth-input::placeholder { color: rgba(242,239,233,.35); }
+.auth-input:focus { border-color: var(--brand); background: rgba(255,255,255,.09); }
+.auth-btn {
+  width: 100%; height: 56px; margin-top: 14px; border: 0; border-radius: 12px; cursor: pointer;
+  background: var(--brand); color: var(--brand-ink);
+  font: 700 17px/1 Oswald, Inter, sans-serif; letter-spacing: .14em; text-transform: uppercase;
+  box-shadow: 0 8px 24px rgba(251,67,17,.28); transition: transform .08s, filter .15s;
+}
+.auth-btn:active { transform: scale(.98); filter: brightness(.92); }
+.auth-sent p { margin: 0 0 10px; color: rgba(242,239,233,.85); }
+.auth-sent b { color: var(--brand); }
+.auth-fine { font-size: 13px; color: rgba(242,239,233,.55) !important; }
+.auth-link { background: none; border: 0; padding: 0; color: var(--brand); font-weight: 600; cursor: pointer; text-decoration: underline; }
