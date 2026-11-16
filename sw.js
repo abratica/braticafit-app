@@ -1,5 +1,5 @@
 // App shell cache + push notifications.
-const CACHE = "psh-v3";
+const CACHE = "psh-v4";
 const SHELL = ["./", "index.html", "styles.css?v=3", "app.js?v=3", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
