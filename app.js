@@ -102,29 +102,18 @@ function openSheet(html) {
 }
 function closeSheet() {
   stopScanner();
+  stopRecap();
   $("#sheet").hidden = true;
   document.body.style.overflow = "";
 }
 $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeSheet(); });
 
 // ---------------------------------------------------------------------------
-// Theme
-// ---------------------------------------------------------------------------
-const THEME_KEY = "psh-theme";
-try { const t = localStorage.getItem(THEME_KEY); if (t) document.documentElement.dataset.theme = t; } catch {}
-$("#theme").addEventListener("click", () => {
-  const dark = document.documentElement.dataset.theme
-    ? document.documentElement.dataset.theme === "dark"
-    : matchMedia("(prefers-color-scheme: dark)").matches;
-  document.documentElement.dataset.theme = dark ? "light" : "dark";
-  try { localStorage.setItem(THEME_KEY, document.documentElement.dataset.theme); } catch {}
-});
-
-// ---------------------------------------------------------------------------
 // Sign in (6-digit email code)
 // ---------------------------------------------------------------------------
 function renderSignIn() {
   $("#tabs").hidden = true;
+  $("#settings").hidden = true;
   document.body.classList.add("signin");
   app.innerHTML = `
     <div class="auth">
@@ -156,9 +145,10 @@ function renderSignIn() {
 // ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
-const VIEWS = { today: renderToday, foods: renderFoods, insights: renderInsights, you: renderYou };
+const VIEWS = { today: renderHome, train: renderTrain, food: renderFood, progress: renderProgress, coach: renderCoach, settings: renderSettings };
 function go(next) {
   tab = next;
+  document.body.classList.remove("has-composer");
   for (const b of document.querySelectorAll("#tabs button")) {
     if (b.dataset.tab === tab) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
@@ -166,58 +156,120 @@ function go(next) {
   window.scrollTo(0, 0);
   return VIEWS[tab]();
 }
+$("#settings").addEventListener("click", () => go("settings"));
 $("#tabs").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-tab]");
   if (b) go(b.dataset.tab);
 });
 
 // ---------------------------------------------------------------------------
-// Today
+// Shared helpers for training views
 // ---------------------------------------------------------------------------
-async function renderToday(highlightId) {
+const ymd = (d = new Date()) => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
+const fromYmd = (s) => new Date(`${s}T12:00:00`);
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const weekStart = (d = new Date()) => { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+const shortFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const wdayFmt = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const callFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+const FEEL = [["easy", "Easy"], ["solid", "Solid"], ["tough", "Tough"], ["rough", "Rough"]];
+
+function ytId(s) {
+  if (!s) return null;
+  const m = String(s).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/);
+  if (m) return m[1];
+  return /^[\w-]{11}$/.test(String(s).trim()) ? String(s).trim() : null;
+}
+const ytThumb = (id) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+const player = (id) => `<div class="player"><iframe src="https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1"
+  title="Workout video" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
+
+const ICO = {
+  play: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`,
+  video: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>`,
+  train: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>`,
+  mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>`,
+  back: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>`,
+  send: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+  camera: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
+  scan: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5h3M17 5h3v2M20 17v2h-3M7 19H4v-2M8 9v6M11 9v6M14 9v6M16.5 9v6"/></svg>`,
+  type: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg>`,
+};
+
+function workoutMeta(w, nEx) {
+  const bits = [w.kind === "video" ? "Video" : "Written"];
+  if (w.duration_min) bits.push(`${w.duration_min} min`);
+  if (w.kind === "written" && nEx) bits.push(`${nEx} exercise${nEx === 1 ? "" : "s"}`);
+  return bits.join(" · ");
+}
+
+// ---------------------------------------------------------------------------
+// Today (home): today's workout, quick food logging, check-ins when due, daily recap
+// ---------------------------------------------------------------------------
+async function renderHome(highlightId) {
   $("#sub").textContent = dayFmt.format(new Date());
   const since = new Date(Date.now() - 24 * 3600e3).toISOString();
-  const [{ data: meals }, { data: pending }] = await Promise.all([
-    db.from("meals").select("id,name,servings,nutrients,eaten_at,energy,stomach,food_id").gte("eaten_at", startOfToday().toISOString()).order("eaten_at", { ascending: false }),
+  const [{ data: ws }, { data: pending }, { data: recaps }] = await Promise.all([
+    db.from("workouts").select("*, workout_exercises(count)").eq("scheduled_on", ymd()).order("created_at"),
     db.from("meals").select("id,name,eaten_at,energy,stomach").gte("eaten_at", since).lte("checkin_due_at", new Date().toISOString()).is("checked_in_at", null).order("eaten_at", { ascending: false }),
+    db.from("recaps").select("id").gte("recorded_at", startOfToday().toISOString()).limit(1),
   ]);
-  const t = sumNutrients((meals ?? []).map((m) => m.nutrients));
+  const list = ws ?? [];
+  const w = list.find((x) => !x.completed_at) ?? list[0];
+  const nEx = w?.workout_exercises?.[0]?.count ?? 0;
+  const recapDone = (recaps ?? []).length > 0;
+
+  let workout;
+  if (!w) {
+    workout = `<div class="card rest">
+      <div class="w-title">Rest day</div>
+      <p class="small muted" style="margin:4px 0 14px">Nothing planned for today.</p>
+      <button class="btn ghost block" id="plan">Plan a workout</button></div>`;
+  } else {
+    const thumb = w.kind === "video" && w.video_id
+      ? `<button class="vthumb" data-open="${w.id}" style="background-image:url('${ytThumb(w.video_id)}')" aria-label="Play ${esc(w.title)}">
+           <span class="play">${ICO.play}</span>${w.duration_min ? `<span class="dur">${w.duration_min} min</span>` : ""}<span class="tag">Video</span></button>`
+      : "";
+    workout = `<div class="card w-card">${thumb}
+      <div class="w-title">${esc(w.title)}</div>
+      <div class="small muted">${workoutMeta(w, nEx)}</div>
+      ${w.completed_at
+        ? `<div class="done-line">${ICO.check}<span>Done${w.feel ? ` · felt ${feelLabel(FEEL, w.feel).toLowerCase()}` : ""}</span></div>`
+        : `<button class="btn primary block start" data-open="${w.id}">${ICO.play}Start workout</button>`}
+    </div>`;
+  }
 
   app.innerHTML = `
     <div id="install-slot"></div>
-    <div class="log-actions">
-      <button class="btn primary wide" id="snap"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Snap food</button>
-      <button class="btn" id="scan"><svg viewBox="0 0 24 24"><path d="M4 7V5h3M17 5h3v2M20 17v2h-3M7 19H4v-2M8 9v6M11 9v6M14 9v6M16.5 9v6"/></svg>Scan barcode</button>
-      <button class="btn" id="type"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg>Type it</button>
+    <h3>Today's workout</h3>
+    ${workout}
+    <h3>Log food</h3>
+    <div class="log-row">
+      <button class="btn" id="snap">${ICO.camera}Snap</button>
+      <button class="btn" id="scan">${ICO.scan}Scan</button>
+      <button class="btn" id="type">${ICO.type}Type</button>
     </div>
-    <p class="small muted" style="margin:8px 2px 0">Eating something you've had before? Tap it in <button class="link" id="to-foods">My foods</button>.</p>
-
     ${(pending ?? []).length ? `<h3>How do you feel?</h3>${pending.map(checkinCard).join("")}` : ""}
+    <h3>Daily recap</h3>
+    <button class="recap-btn" id="recap">
+      <span class="recap-ico ${recapDone ? "done" : ""}">${recapDone ? ICO.check : ICO.mic}</span>
+      <span><b>${recapDone ? "Today's recap is in" : "Tell me how today went"}</b>
+      <span class="small muted">${recapDone ? "Tap to add more" : "Talk for about a minute"}</span></span>
+    </button>`;
 
-    <h3>Today, roughly</h3>
-    <div class="card totals">
-      <div><b>${r0(t.kcal)}</b><span>calories</span></div>
-      <div><b>${r0(t.protein)}g</b><span>protein</span></div>
-      <div><b>${r0(t.carbs)}g</b><span>carbs</span></div>
-      <div><b>${r0(t.fat)}g</b><span>fat</span></div>
-    </div>
-
-    <h3>Logged today</h3>
-    ${(meals ?? []).length
-      ? `<div class="card"><ul class="list">${meals.map((m) => `
-          <li><button class="row" data-meal="${m.id}">
-            <div class="main"><div class="name">${esc(m.name)}${m.servings != 1 ? ` <span class="badge">×${m.servings}</span>` : ""}</div>
-            <div class="meta">${timeFmt.format(new Date(m.eaten_at))} · ${macroLine(m.nutrients)}</div></div>
-            <div class="end">${feelBadge(m)}</div>
-          </button></li>`).join("")}</ul></div>`
-      : `<p class="empty">Nothing logged yet today.</p>`}
-  `;
+  app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
+  $("#plan")?.addEventListener("click", () => openPlanner());
   $("#snap").addEventListener("click", () => $("#camera").click());
   $("#type").addEventListener("click", openTextLog);
   $("#scan").addEventListener("click", openScanner);
-  $("#to-foods").addEventListener("click", () => go("foods"));
-  bindCheckins(app, () => renderToday());
-  app.querySelectorAll("[data-meal]").forEach((b) => b.addEventListener("click", () => openMeal(b.dataset.meal)));
+  $("#recap").addEventListener("click", openRecap);
+  bindCheckins(app, () => renderHome());
   showInstallBar();
 
   if (highlightId) {
@@ -225,6 +277,470 @@ async function renderToday(highlightId) {
     if (card) { card.scrollIntoView({ block: "center" }); card.classList.add("flash"); }
     else openMeal(highlightId);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Daily voice recap (speech-to-text in the browser, editable before saving)
+// ---------------------------------------------------------------------------
+let activeRec = null;
+function stopRecap() { try { activeRec?.stop(); } catch {} activeRec = null; }
+
+function openRecap() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const body = openSheet(`
+    <h2>Daily recap</h2>
+    <p class="small muted">How did today go? Training, food, sleep, stress, anything worth noting.</p>
+    ${SR ? `<button class="mic-big" id="mic" aria-pressed="false" aria-label="Start talking">${ICO.mic}</button>
+            <p class="small muted center" id="mic-state">Tap to talk. Tap again to stop.</p>` : `<p class="small muted">Voice isn't available in this browser, so type it instead.</p>`}
+    <label class="field"><span>Your recap</span><textarea class="input" id="rt" rows="6" placeholder="It shows up here as you talk. You can edit it."></textarea></label>
+    <button class="btn primary block" id="save-recap">Save recap</button>`);
+  const ta = $("#rt", body);
+  if (SR) {
+    const mic = $("#mic", body);
+    let base = "";
+    mic.addEventListener("click", () => {
+      if (activeRec) { stopRecap(); return; }
+      const rec = new SR();
+      rec.lang = navigator.language || "en-US";
+      rec.continuous = true;
+      rec.interimResults = true;
+      base = ta.value ? ta.value.trim() + " " : "";
+      rec.onresult = (e) => {
+        let finalText = "", interim = "";
+        for (let i = 0; i < e.results.length; i++) {
+          if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+          else interim += e.results[i][0].transcript;
+        }
+        ta.value = (base + finalText + interim).replace(/\s+/g, " ").trimStart();
+      };
+      rec.onend = () => {
+        activeRec = null;
+        mic.setAttribute("aria-pressed", "false");
+        mic.setAttribute("aria-label", "Start talking");
+        $("#mic-state", body).textContent = "Tap to keep talking.";
+      };
+      rec.onerror = (e) => { if (e.error === "not-allowed") toast("Microphone access is blocked"); };
+      activeRec = rec;
+      rec.start();
+      mic.setAttribute("aria-pressed", "true");
+      mic.setAttribute("aria-label", "Stop");
+      $("#mic-state", body).textContent = "Listening… tap to stop.";
+    });
+  }
+  $("#save-recap", body).addEventListener("click", async () => {
+    stopRecap();
+    const text = ta.value.trim();
+    if (!text) return toast("Nothing to save yet");
+    const { error } = await db.from("recaps").insert({ transcript: text });
+    if (error) return toast(error.message);
+    closeSheet();
+    toast("Recap saved");
+    if (tab === "today") renderHome();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Train: this week, the plan, past workouts
+// ---------------------------------------------------------------------------
+async function renderTrain() {
+  const mon = weekStart();
+  const sun = addDays(mon, 6);
+  $("#sub").textContent = `Week of ${shortFmt.format(mon)}`;
+  const [{ data: week }, { data: past }] = await Promise.all([
+    db.from("workouts").select("*, workout_exercises(count)").gte("scheduled_on", ymd(mon)).lte("scheduled_on", ymd(sun)).order("scheduled_on").order("created_at"),
+    db.from("workouts").select("*").not("completed_at", "is", null).lt("scheduled_on", ymd(mon)).order("scheduled_on", { ascending: false }).limit(8),
+  ]);
+  const ws = week ?? [];
+  const today = ymd();
+  const strip = Array.from({ length: 7 }, (_, i) => {
+    const d = addDays(mon, i);
+    const key = ymd(d);
+    const items = ws.filter((w) => w.scheduled_on === key);
+    const done = items.length && items.every((w) => w.completed_at);
+    const mark = done ? `<span class="wk-mark on">${ICO.check}</span>` : items.length ? `<span class="wk-dot"></span>` : `<span class="wk-mark"></span>`;
+    return `<div class="wk-day ${key === today ? "today" : ""}"><span class="wk-dow">${wdayFmt.format(d).slice(0, 1)}</span><b>${d.getDate()}</b>${mark}</div>`;
+  }).join("");
+
+  const planRow = (w) => {
+    const nEx = w.workout_exercises?.[0]?.count ?? 0;
+    const when = w.scheduled_on === today ? "today" : wdayFmt.format(fromYmd(w.scheduled_on));
+    const end = w.completed_at ? `<span class="ok">${ICO.check}</span>` : `<span class="go">${w.scheduled_on === today ? "Start" : "Open"}</span>`;
+    return `<li><button class="row" data-open="${w.id}">
+      <span class="ico-box">${w.kind === "video" ? ICO.video : ICO.train}</span>
+      <div class="main"><div class="name">${esc(w.title)}</div><div class="meta">${workoutMeta(w, nEx)} · ${w.completed_at ? `done ${when}` : when}</div></div>
+      <div class="end">${end}</div></button></li>`;
+  };
+
+  app.innerHTML = `
+    <h3>This week</h3>
+    <div class="wk">${strip}</div>
+    ${ws.length ? `<div class="card" style="margin-top:12px;padding-top:4px;padding-bottom:4px"><ul class="list">${ws.map(planRow).join("")}</ul></div>`
+      : `<p class="empty">Nothing planned this week yet.</p>`}
+    <button class="btn ghost block" id="plan" style="margin-top:10px">${ICO.plus}Plan a workout</button>
+    ${(past ?? []).length ? `<h3>Past workouts</h3><div class="card" style="padding-top:4px;padding-bottom:4px"><ul class="list">${past.map((w) => `
+      <li><button class="row" data-open="${w.id}"><div class="main"><div class="name">${esc(w.title)}</div>
+      <div class="meta">${dayFmt.format(fromYmd(w.scheduled_on))}${w.duration_min ? ` · ${w.duration_min} min` : ""}</div></div>
+      <div class="end">${w.feel ? feelLabel(FEEL, w.feel) : ""}</div></button></li>`).join("")}</ul></div>` : ""}`;
+  app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
+  $("#plan").addEventListener("click", () => openPlanner());
+}
+
+// Plan a workout (until the Coach app exists, you plan your own)
+function openPlanner() {
+  let kind = "video";
+  const body = openSheet(`
+    <h2>Plan a workout</h2>
+    <label class="field"><span>Day</span><input class="input" id="pd" type="date" value="${ymd()}"></label>
+    <label class="field"><span>Name</span><input class="input" id="pt" placeholder="Lower body strength" required></label>
+    <div class="field"><span class="muted small">Type</span>
+      <div class="seg seg-wide" id="pk"><button data-v="video" aria-pressed="true">Video</button><button data-v="written" aria-pressed="false">Written</button></div></div>
+    <div id="pv">
+      <label class="field"><span>YouTube link</span><input class="input" id="pu" inputmode="url" placeholder="https://youtu.be/…"></label>
+    </div>
+    <div id="pw" hidden>
+      <label class="field"><span>Exercises, one per line</span><textarea class="input" id="px" rows="6"
+        placeholder="Goblet squat, 3x10, 50&#10;Romanian deadlift, 3x8, 60&#10;Side plank, 3x30 sec"></textarea></label>
+      <p class="small muted" style="margin-top:-4px">Name, sets x reps, weight. Add a YouTube link on any line for its demo.</p>
+    </div>
+    <label class="field"><span>Minutes <span class="muted">(optional)</span></span><input class="input" id="pm" type="number" inputmode="numeric"></label>
+    <label class="field"><span>Note <span class="muted">(optional)</span></span><input class="input" id="pn" placeholder="Slow 3-second lower on the squats"></label>
+    <button class="btn primary block" id="psave">Save workout</button>`);
+  $("#pk", body).addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    kind = b.dataset.v;
+    $("#pk", body).querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    $("#pv", body).hidden = kind !== "video";
+    $("#pw", body).hidden = kind !== "written";
+  });
+  $("#psave", body).addEventListener("click", async () => {
+    const title = $("#pt", body).value.trim();
+    if (!title) return toast("Give it a name");
+    const row = {
+      scheduled_on: $("#pd", body).value || ymd(), title, kind,
+      duration_min: $("#pm", body).value ? Number($("#pm", body).value) : null,
+      note: $("#pn", body).value.trim() || null,
+    };
+    let exercises = [];
+    if (kind === "video") {
+      row.video_id = ytId($("#pu", body).value);
+      if (!row.video_id) return toast("That doesn't look like a YouTube link");
+    } else {
+      exercises = parseExercises($("#px", body).value);
+      if (!exercises.length) return toast("Add at least one exercise");
+    }
+    $("#psave", body).disabled = true;
+    const { data: w, error } = await db.from("workouts").insert(row).select().single();
+    if (error) { $("#psave", body).disabled = false; return toast(error.message); }
+    if (exercises.length) {
+      const { error: e2 } = await db.from("workout_exercises").insert(exercises.map((x, i) => ({ ...x, workout_id: w.id, position: i })));
+      if (e2) toast(e2.message);
+    }
+    closeSheet();
+    toast("Workout planned");
+    go(tab === "today" ? "today" : "train");
+  });
+}
+
+function parseExercises(text) {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const parts = line.split(",").map((p) => p.trim()).filter(Boolean);
+    let demo = null;
+    const rest = parts.filter((p) => { const id = ytId(p); if (id && /youtu/.test(p)) { demo = id; return false; } return true; });
+    const [name, scheme = "", weight = ""] = rest;
+    const m = scheme.match(/^(\d+)\s*[x×]\s*(.+)$/i);
+    const nSets = m ? Math.min(Number(m[1]), 10) : 0;
+    const reps = m ? m[2].trim() : "";
+    const wt = weight.replace(/\s*(lb|lbs|kg)$/i, "");
+    return {
+      name: name || line, scheme: m ? `${m[1]} × ${reps}` : scheme || null, demo_video_id: demo,
+      sets: Array.from({ length: nSets }, () => ({ reps, weight: wt, done: false })),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Workout session: video player, or written exercises with sets to check off
+// ---------------------------------------------------------------------------
+async function openSession(id) {
+  const back = tab === "today" ? "today" : "train";
+  const [{ data: w }, { data: exs }] = await Promise.all([
+    db.from("workouts").select("*").eq("id", id).single(),
+    db.from("workout_exercises").select("*").eq("workout_id", id).order("position"),
+  ]);
+  if (!w) return toast("Couldn't find that workout");
+  window.scrollTo(0, 0);
+  const list = exs ?? [];
+  $("#sub").textContent = w.scheduled_on === ymd() ? "Today" : dayFmt.format(fromYmd(w.scheduled_on));
+
+  const exCard = (x, i) => `
+    <div class="card ex" data-ex="${i}">
+      <div class="ex-head">
+        ${x.demo_video_id ? `<button class="ex-demo" data-demo="${x.demo_video_id}" style="background-image:url('${ytThumb(x.demo_video_id)}')" aria-label="Watch the ${esc(x.name)} demo"><span class="play sm">${ICO.play}</span></button>` : ""}
+        <div class="main"><div class="name">${esc(x.name)}</div><div class="small muted">${esc(x.scheme || "")}${x.demo_video_id ? " · tap the video for the demo" : ""}</div></div>
+      </div>
+      ${x.sets?.length ? `<div class="set-grid set-head"><span>Set</span><span>Reps</span><span>Weight</span><span></span></div>
+        ${x.sets.map((s, j) => `<div class="set-grid" data-set="${j}">
+          <span class="set-n">${j + 1}</span>
+          <input class="input set-in" data-f="reps" value="${esc(s.reps)}" aria-label="Set ${j + 1} reps">
+          <input class="input set-in" data-f="weight" value="${esc(s.weight)}" inputmode="decimal" aria-label="Set ${j + 1} weight">
+          <button class="set-done" data-done aria-pressed="${!!s.done}" aria-label="Set ${j + 1} done">${ICO.check}</button></div>`).join("")}` : ""}
+    </div>`;
+
+  app.innerHTML = `
+    <div class="sess-head">
+      <button class="icon-btn" id="back" aria-label="Back">${ICO.back}</button>
+      <div><div class="w-title">${esc(w.title)}</div><div class="small muted">${workoutMeta(w, list.length)}</div></div>
+    </div>
+    ${w.note ? `<h3>Coach note</h3><div class="card note">${esc(w.note)}</div>` : ""}
+    ${w.kind === "video" && w.video_id ? `<div style="margin-top:14px">${player(w.video_id)}</div>` : ""}
+    ${list.length ? `<h3>Exercises</h3>${list.map(exCard).join("")}` : ""}
+    ${w.completed_at
+      ? `<div class="done-line" style="margin-top:16px">${ICO.check}<span>Done${w.feel ? ` · felt ${feelLabel(FEEL, w.feel).toLowerCase()}` : ""}</span></div>
+         <button class="btn ghost block" id="undo" style="margin-top:10px">Mark not done</button>`
+      : `<button class="btn primary block" id="finish" style="margin-top:16px">${w.kind === "video" ? "Mark done" : "Finish workout"}</button>`}
+    <button class="btn danger block" id="del-w" style="margin-top:10px">Delete workout</button>`;
+
+  $("#back").addEventListener("click", () => go(back));
+  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>Demo</h2>${player(b.dataset.demo)}`)));
+
+  const timers = {};
+  const save = (i) => {
+    clearTimeout(timers[i]);
+    timers[i] = setTimeout(async () => {
+      const { error } = await db.from("workout_exercises").update({ sets: list[i].sets }).eq("id", list[i].id);
+      if (error) toast(error.message);
+    }, 400);
+  };
+  app.querySelectorAll("[data-ex]").forEach((card) => {
+    const i = Number(card.dataset.ex);
+    card.addEventListener("input", (e) => {
+      const inp = e.target.closest(".set-in");
+      if (!inp) return;
+      const j = Number(inp.closest("[data-set]").dataset.set);
+      list[i].sets[j][inp.dataset.f] = inp.value;
+      save(i);
+    });
+    card.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-done]");
+      if (!b) return;
+      const j = Number(b.closest("[data-set]").dataset.set);
+      list[i].sets[j].done = !list[i].sets[j].done;
+      b.setAttribute("aria-pressed", String(list[i].sets[j].done));
+      save(i);
+    });
+  });
+
+  $("#finish")?.addEventListener("click", () => {
+    const body = openSheet(`<h2>How did it feel?</h2><div class="chips" id="feel">${FEEL.map(([k, l]) => `<button class="chip" data-v="${k}">${l}</button>`).join("")}</div>`);
+    $("#feel", body).addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-v]");
+      if (!b) return;
+      const { error } = await db.from("workouts").update({ completed_at: new Date().toISOString(), feel: b.dataset.v }).eq("id", w.id);
+      if (error) return toast(error.message);
+      closeSheet();
+      toast("Nice work");
+      go(back);
+    });
+  });
+  $("#undo")?.addEventListener("click", async () => {
+    await db.from("workouts").update({ completed_at: null, feel: null }).eq("id", w.id);
+    openSession(w.id);
+  });
+  $("#del-w").addEventListener("click", async () => {
+    if (!confirmDelete(w.title)) return;
+    await db.from("workouts").delete().eq("id", w.id);
+    toast("Deleted");
+    go(back);
+  });
+}
+
+// Two-tap delete without a browser dialog
+let pendingDelete = null;
+function confirmDelete(name) {
+  if (pendingDelete === name) { pendingDelete = null; return true; }
+  pendingDelete = name;
+  toast("Tap delete again to confirm");
+  setTimeout(() => { if (pendingDelete === name) pendingDelete = null; }, 4000);
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Food: log, today's numbers, what you've logged, My foods
+// ---------------------------------------------------------------------------
+let foodSeg = "today";
+const foodSegHtml = () => `<div class="seg seg-wide" id="fseg" style="margin:6px 0 4px">
+  <button data-v="today" aria-pressed="${foodSeg === "today"}">Today</button><button data-v="mine" aria-pressed="${foodSeg === "mine"}">My foods</button></div>`;
+function bindFoodSeg() {
+  $("#fseg")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-v]");
+    if (!b || b.dataset.v === foodSeg) return;
+    foodSeg = b.dataset.v;
+    renderFood();
+  });
+}
+
+async function renderFood() {
+  if (foodSeg === "mine") { await renderFoods(foodSegHtml()); bindFoodSeg(); return; }
+  $("#sub").textContent = dayFmt.format(new Date());
+  const { data: meals } = await db.from("meals").select("id,name,servings,nutrients,eaten_at,energy,stomach,food_id")
+    .gte("eaten_at", startOfToday().toISOString()).order("eaten_at", { ascending: false });
+  const t = sumNutrients((meals ?? []).map((m) => m.nutrients));
+  const kcal = r0(t.kcal);
+  const share = (g, per) => (kcal ? Math.round((g * per * 100) / kcal) : 0);
+  const bar = (name, g, per) => `<div class="mbar"><div class="mbar-top"><span>${name}</span><b>${r0(g)}g${kcal ? ` <i>· ${share(g, per)}% of calories</i>` : ""}</b></div>
+    <div class="mbar-track"><div style="width:${Math.min(100, share(g, per))}%"></div></div></div>`;
+
+  app.innerHTML = `
+    ${foodSegHtml()}
+    <div class="log-actions" style="margin-top:12px">
+      <button class="btn primary wide" id="snap">${ICO.camera}Snap food</button>
+      <button class="btn" id="scan">${ICO.scan}Scan barcode</button>
+      <button class="btn" id="type">${ICO.type}Type it</button>
+    </div>
+    <h3>Today, roughly</h3>
+    <div class="card">
+      <div class="kcal"><b>${kcal.toLocaleString()}</b><span>calories so far</span></div>
+      ${bar("Protein", t.protein, 4)}${bar("Carbs", t.carbs, 4)}${bar("Fat", t.fat, 9)}
+    </div>
+    <h3>Logged today</h3>
+    ${(meals ?? []).length
+      ? `<div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${meals.map((m) => `
+          <li><button class="row" data-meal="${m.id}">
+            <div class="main"><div class="name">${esc(m.name)}${m.servings != 1 ? ` <span class="badge">×${m.servings}</span>` : ""}</div>
+            <div class="meta">${timeFmt.format(new Date(m.eaten_at))} · ${macroLine(m.nutrients)}</div></div>
+            <div class="end">${feelBadge(m)}</div>
+          </button></li>`).join("")}</ul></div>`
+      : `<p class="empty">Nothing logged yet today.</p>`}`;
+  bindFoodSeg();
+  $("#snap").addEventListener("click", () => $("#camera").click());
+  $("#type").addEventListener("click", openTextLog);
+  $("#scan").addEventListener("click", openScanner);
+  app.querySelectorAll("[data-meal]").forEach((b) => b.addEventListener("click", () => openMeal(b.dataset.meal)));
+}
+
+// ---------------------------------------------------------------------------
+// Progress: the week in numbers, weight trend, summaries and patterns
+// ---------------------------------------------------------------------------
+async function renderProgress() {
+  $("#sub").textContent = "Last 7 days";
+  const since = new Date(Date.now() - 7 * 24 * 3600e3).toISOString();
+  const mon = weekStart();
+  const [{ data: obs }, { data: week }, { data: wks }, { data: weights }] = await Promise.all([
+    db.from("observations").select("id,kind,title,short,created_at,read_at").order("created_at", { ascending: false }).limit(50),
+    db.from("meals").select("name,nutrients,eaten_at,checked_in_at").gte("eaten_at", since),
+    db.from("workouts").select("id,completed_at").gte("scheduled_on", ymd(mon)).lte("scheduled_on", ymd(addDays(mon, 6))),
+    db.from("weights").select("weight_lb,measured_at").order("measured_at", { ascending: false }).limit(12),
+  ]);
+  const meals = week ?? [];
+  const days = new Set(meals.map((m) => new Date(m.eaten_at).toDateString())).size || 1;
+  const t = sumNutrients(meals.map((m) => m.nutrients));
+  const planned = (wks ?? []).length;
+  const done = (wks ?? []).filter((w) => w.completed_at).length;
+  const checkins = meals.filter((m) => m.checked_in_at).length;
+  const ws = (weights ?? []).slice().reverse();
+
+  let spark = "";
+  if (ws.length >= 2) {
+    const vals = ws.map((w) => Number(w.weight_lb));
+    const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+    const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * 300).toFixed(1)},${(8 + (1 - (v - lo) / span) * 54).toFixed(1)}`).join(" ");
+    spark = `<svg class="spark" viewBox="0 0 300 70" preserveAspectRatio="none" role="img" aria-label="Weight trend, ${vals[0]} to ${vals[vals.length - 1]} pounds">
+      <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+
+  app.innerHTML = `
+    <h3>This week</h3>
+    <div class="stat-grid">
+      <div class="stat"><b>${planned ? `${done} of ${planned}` : done}</b><span>Workouts done</span></div>
+      <div class="stat"><b>${meals.length ? `${r0(t.protein / days)}g` : "–"}</b><span>Avg protein</span></div>
+      <div class="stat"><b>${meals.length ? r0(t.kcal / days).toLocaleString() : "–"}</b><span>Avg calories</span></div>
+      <div class="stat"><b>${checkins}</b><span>Check-ins</span></div>
+    </div>
+
+    <h3>Weight</h3>
+    <div class="card">
+      ${ws.length ? `<div class="wt-top"><b>${ws[ws.length - 1].weight_lb} lb</b><span class="small muted">${dayFmt.format(new Date(ws[ws.length - 1].measured_at))}</span></div>${spark}` : `<p class="small muted" style="margin-top:0">Optional. Log it whenever you like and the trend shows here.</p>`}
+      <form id="wf" class="wt-form"><input class="input" id="wt" type="number" inputmode="decimal" step="0.1" placeholder="lb" aria-label="Weight in pounds" required><button class="btn">Log</button></form>
+    </div>
+
+    <h3>Summaries & patterns</h3>
+    ${meals.length ? `<button class="btn ghost block" id="gen" style="margin-bottom:10px">Write my summary now</button>` : ""}
+    ${(obs ?? []).length ? obs.map((o) => `
+      <button class="card obs row ${o.read_at ? "" : "unread"}" data-obs="${o.id}" style="display:block">
+        <div class="when">${o.kind === "weekly" ? "Weekly summary" : "Pattern"} · ${dayFmt.format(new Date(o.created_at))}</div>
+        <div class="title">${esc(o.title)}</div>
+        <div class="small muted">${esc(o.short)}</div>
+      </button>`).join("")
+    : `<p class="empty">Your first weekly summary arrives Sunday morning. Patterns show up once something repeats a few times in your check-ins.</p>`}`;
+
+  $("#wf").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { error } = await db.from("weights").insert({ weight_lb: Number($("#wt").value) });
+    if (error) return toast(error.message);
+    toast("Weight logged");
+    renderProgress();
+  });
+  $("#gen")?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Writing…";
+    try {
+      const r = await api("weekly_now");
+      if (r.id) openObservation(r.id);
+      else toast("Not enough logged yet");
+    } catch (err) { toast(err.message); }
+    renderProgress();
+  });
+  app.querySelectorAll("[data-obs]").forEach((b) => b.addEventListener("click", () => openObservation(b.dataset.obs)));
+  refreshDot();
+}
+
+// ---------------------------------------------------------------------------
+// Coach: next call and messages
+// ---------------------------------------------------------------------------
+async function renderCoach() {
+  $("#sub").textContent = "Your coach";
+  const [{ data: calls }, { data: msgs }] = await Promise.all([
+    db.from("calls").select("*").gte("starts_at", new Date(Date.now() - 3600e3).toISOString()).order("starts_at").limit(1),
+    db.from("messages").select("*").order("created_at").limit(300),
+  ]);
+  const call = (calls ?? [])[0];
+  const list = msgs ?? [];
+  const live = call && Date.now() >= new Date(call.starts_at).getTime() - 10 * 60e3;
+
+  app.innerHTML = `
+    <div class="card call">
+      <img src="icons/logo.webp" alt="" width="54" height="54">
+      <div class="main">
+        <div class="call-title">${call ? `Next call · ${callFmt.format(new Date(call.starts_at))}` : "No call booked"}</div>
+        <div class="small muted">${call ? `${esc(call.title)} · ${call.minutes} min` : "Your next check-in call shows up here."}</div>
+      </div>
+    </div>
+    ${call?.join_url ? `<a class="btn ${live ? "primary" : ""} block" href="${esc(call.join_url)}" target="_blank" rel="noopener" style="margin-top:8px;text-decoration:none">${ICO.video}Join call</a>` : ""}
+    <h3>Messages</h3>
+    <div class="bubbles" id="bubbles">
+      ${list.length ? list.map((m) => `<div class="bubble ${m.from_coach ? "them" : "me"}"><div>${esc(m.body)}</div>
+        <span>${m.from_coach ? "Coach · " : ""}${when(m.created_at)}</span></div>`).join("")
+        : `<p class="empty">Messages with your coach show up here.</p>`}
+    </div>
+    <form class="composer" id="cmp">
+      <input class="input" id="msg" placeholder="Message your coach" aria-label="Message your coach" autocomplete="off">
+      <button class="send" aria-label="Send">${ICO.send}</button>
+    </form>`;
+  document.body.classList.add("has-composer");
+  $("#cmp").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = $("#msg").value.trim();
+    if (!body) return;
+    $("#msg").value = "";
+    const { error } = await db.from("messages").insert({ body });
+    if (error) return toast(error.message);
+    await renderCoach();
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+  const unread = list.filter((m) => m.from_coach && !m.read_at).map((m) => m.id);
+  if (unread.length) await db.from("messages").update({ read_at: new Date().toISOString() }).in("id", unread);
+  refreshDot();
 }
 
 const feelLabel = (list, v) => list.find(([k]) => k === v)?.[1] ?? "";
@@ -525,22 +1041,23 @@ async function logFood(food, servings, eatenAt) {
   closeSheet();
   const due = new Date(eatenAt.getTime() + 2 * 3600e3);
   toast(due > new Date() ? `Logged. I'll check in around ${timeFmt.format(due)}.` : "Logged");
-  go("today");
+  foodSeg = "today";
+  go("food");
 }
 
 // ---------------------------------------------------------------------------
 // My foods
 // ---------------------------------------------------------------------------
-async function renderFoods() {
-  $("#sub").textContent = "Tap something to log it again";
+async function renderFoods(prefix = "") {
+  $("#sub").textContent = "Tap one to log it again";
   const { data: foods } = await db.from("foods").select("id,name,nutrients,thumb,times_logged,last_logged_at,tags,portion_label")
     .order("last_logged_at", { ascending: false, nullsFirst: false });
   const list = foods ?? [];
-  app.innerHTML = list.length
-    ? `<label class="search"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zm5-2 4 4"/></svg>
+  app.innerHTML = prefix + (list.length
+    ? `<label class="search" style="margin-top:12px"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zm5-2 4 4"/></svg>
         <input id="q" type="search" placeholder="Search my foods" autocomplete="off"></label>
        <div class="card"><ul class="list" id="fl"></ul></div>`
-    : `<p class="empty">Your foods list fills up as you log.<br>Snap or type your first meal on the Today tab.</p>`;
+    : `<p class="empty">Your foods list fills up as you log.<br>Snap or type your first meal under Today.</p>`);
   if (!list.length) return;
 
   const draw = (q = "") => {
@@ -591,60 +1108,8 @@ function openFood(food) {
     await db.from("foods").delete().eq("id", food.id);
     closeSheet();
     toast("Removed");
-    renderFoods();
+    renderFood();
   });
-}
-
-// ---------------------------------------------------------------------------
-// Insights
-// ---------------------------------------------------------------------------
-async function renderInsights() {
-  $("#sub").textContent = "Weekly summaries and patterns";
-  const since = new Date(Date.now() - 7 * 24 * 3600e3).toISOString();
-  const [{ data: obs }, { data: week }] = await Promise.all([
-    db.from("observations").select("id,kind,title,short,created_at,read_at").order("created_at", { ascending: false }).limit(50),
-    db.from("meals").select("name,nutrients,eaten_at").gte("eaten_at", since),
-  ]);
-  const meals = week ?? [];
-  const days = new Set(meals.map((m) => new Date(m.eaten_at).toDateString())).size || 1;
-  const t = sumNutrients(meals.map((m) => m.nutrients));
-  const sat = new Map();
-  for (const m of meals) sat.set(m.name, (sat.get(m.name) ?? 0) + (Number(m.nutrients?.sat_fat) || 0));
-  const topSat = [...sat.entries()].sort((a, b) => b[1] - a[1]).filter(([, v]) => v >= 1).slice(0, 3);
-
-  app.innerHTML = `
-    <h3>Last 7 days, per logged day</h3>
-    ${meals.length ? `
-      <div class="card totals">
-        <div><b>${r0(t.kcal / days)}</b><span>calories</span></div>
-        <div><b>${r0(t.protein / days)}g</b><span>protein</span></div>
-        <div><b>${r0(t.carbs / days)}g</b><span>carbs</span></div>
-        <div><b>${r0(t.fat / days)}g</b><span>fat</span></div>
-      </div>
-      ${topSat.length ? `<p class="small muted">Most saturated fat: ${topSat.map(([n, v]) => `${esc(n)} (${r0(v)}g)`).join(", ")}</p>` : ""}
-      <button class="btn ghost block" id="gen">Write my summary now</button>` : `<p class="empty">Log a few meals and this fills in.</p>`}
-
-    <h3>Summaries & patterns</h3>
-    ${(obs ?? []).length ? (obs).map((o) => `
-      <button class="card obs row ${o.read_at ? "" : "unread"}" data-obs="${o.id}" style="display:block">
-        <div class="when">${o.kind === "weekly" ? "Weekly summary" : "Pattern"} · ${dayFmt.format(new Date(o.created_at))}</div>
-        <div class="title">${esc(o.title)}</div>
-        <div class="small muted">${esc(o.short)}</div>
-      </button>`).join("")
-    : `<p class="empty">Your first weekly summary arrives Sunday morning. Patterns show up once something repeats a few times in your check-ins.</p>`}
-  `;
-  $("#gen")?.addEventListener("click", async (e) => {
-    e.target.disabled = true;
-    e.target.textContent = "Writing…";
-    try {
-      const r = await api("weekly_now");
-      if (r.id) openObservation(r.id);
-      else toast("Not enough logged yet");
-    } catch (err) { toast(err.message); }
-    renderInsights();
-  });
-  app.querySelectorAll("[data-obs]").forEach((b) => b.addEventListener("click", () => openObservation(b.dataset.obs)));
-  refreshDot();
 }
 
 async function openObservation(id) {
@@ -674,22 +1139,24 @@ async function openObservation(id) {
 }
 
 async function refreshDot() {
-  const { count } = await db.from("observations").select("id", { count: "exact", head: true }).is("read_at", null);
-  $('#tabs [data-tab="insights"] .dot').hidden = !count;
+  const [{ count }, { count: msgs }] = await Promise.all([
+    db.from("observations").select("id", { count: "exact", head: true }).is("read_at", null),
+    db.from("messages").select("id", { count: "exact", head: true }).eq("from_coach", true).is("read_at", null),
+  ]);
+  $('#tabs [data-tab="progress"] .dot').hidden = !count;
+  $('#tabs [data-tab="coach"] .dot').hidden = !msgs;
 }
 
 // ---------------------------------------------------------------------------
-// You: notifications, weight, labs
+// Settings: notifications, lab results, sign out
 // ---------------------------------------------------------------------------
-async function renderYou() {
-  $("#sub").textContent = user?.email ?? "";
-  const [{ data: weights }, { data: labs }] = await Promise.all([
-    db.from("weights").select("*").order("measured_at", { ascending: false }).limit(8),
-    db.from("labs").select("*").order("taken_on", { ascending: false }).limit(10),
-  ]);
+async function renderSettings() {
+  $("#sub").textContent = "Settings";
+  const { data: labs } = await db.from("labs").select("*").order("taken_on", { ascending: false }).limit(10);
   const pushState = await pushStatus();
 
   app.innerHTML = `
+    <p class="small muted" style="margin:6px 2px 0">${esc(user?.email ?? "")}</p>
     <h3>Notifications</h3>
     <div class="card">
       <p class="small" style="margin-top:0">Check-ins about 2 hours after you eat (not between 10pm and 8am), patterns when they show up, and your Sunday summary.</p>
@@ -699,19 +1166,10 @@ async function renderYou() {
         : `<button class="btn primary block" id="push">Turn on notifications</button>`}
     </div>
 
-    <h3>Weight <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">· optional</span></h3>
-    <div class="card">
-      <form id="wf" style="display:flex;gap:8px">
-        <input class="input" id="wt" type="number" inputmode="decimal" step="0.1" placeholder="lb" required>
-        <button class="btn primary">Log</button>
-      </form>
-      ${(weights ?? []).length ? `<ul class="list" style="margin-top:8px">${weights.map((w) => `<li class="row" style="cursor:default"><div class="main">${w.weight_lb} lb</div><div class="end">${dayFmt.format(new Date(w.measured_at))}</div></li>`).join("")}</ul>` : ""}
-    </div>
-
     <h3>Lab results</h3>
     <div class="card">
       <form id="lf">
-        <label class="field"><span>Test date</span><input class="input" id="ld" type="date" required value="${new Date().toISOString().slice(0, 10)}"></label>
+        <label class="field"><span>Test date</span><input class="input" id="ld" type="date" required value="${ymd()}"></label>
         <div class="grid4">
           <label class="field"><span>LDL</span><input class="input" id="l-ldl" type="number" inputmode="numeric"></label>
           <label class="field"><span>HDL</span><input class="input" id="l-hdl" type="number" inputmode="numeric"></label>
@@ -733,13 +1191,6 @@ async function renderYou() {
     try { const r = await api("test_push"); toast(r.sent ? "Sent. It should pop up in a moment." : "No devices subscribed yet"); }
     catch (e) { toast(e.message); }
   });
-  $("#wf").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const { error } = await db.from("weights").insert({ weight_lb: Number($("#wt").value) });
-    if (error) return toast(error.message);
-    toast("Weight logged");
-    renderYou();
-  });
   $("#lf").addEventListener("submit", async (e) => {
     e.preventDefault();
     const v = (id) => ($(id).value === "" ? null : Number($(id).value));
@@ -748,7 +1199,7 @@ async function renderYou() {
     const { error } = await db.from("labs").insert(row);
     if (error) return toast(error.message);
     toast("Results saved");
-    renderYou();
+    renderSettings();
   });
   $("#out").addEventListener("click", () => db.auth.signOut());
 }
@@ -770,7 +1221,7 @@ async function pushStatus() {
 async function enablePush() {
   try {
     const perm = await Notification.requestPermission();
-    if (perm !== "granted") { toast("Notifications not allowed"); return renderYou(); }
+    if (perm !== "granted") { toast("Notifications not allowed"); return renderSettings(); }
     const { publicKey } = await api("vapid");
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
@@ -785,7 +1236,7 @@ async function enablePush() {
   } catch (e) {
     toast(e.message || "Couldn't turn on notifications");
   }
-  renderYou();
+  renderSettings();
 }
 
 // ---------------------------------------------------------------------------
@@ -812,8 +1263,8 @@ async function handleHash() {
   if (!h || !user || !/^(checkin|obs)=/.test(h)) return false;
   history.replaceState(null, "", location.pathname + location.search);
   const [k, v] = h.split("=");
-  if (k === "checkin" && v) { tab = "today"; markTab(); await renderToday(v); return true; }
-  if (k === "obs" && v) { tab = "insights"; markTab(); await renderInsights(); openObservation(v); return true; }
+  if (k === "checkin" && v) { tab = "today"; markTab(); await renderHome(v); return true; }
+  if (k === "obs" && v) { tab = "progress"; markTab(); await renderProgress(); openObservation(v); return true; }
   return false;
 }
 function markTab() {
@@ -841,6 +1292,7 @@ async function enter(session) {
     return;
   }
   $("#tabs").hidden = false;
+  $("#settings").hidden = false;
   if (!(await handleHash())) await go(tab);
   refreshDot();
 }
@@ -855,5 +1307,5 @@ db.auth.onAuthStateChange((event, session) => {
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && user && tab === "today" && $("#sheet").hidden) renderToday();
+  if (document.visibilityState === "visible" && user && tab === "today" && $("#sheet").hidden) renderHome();
 });
