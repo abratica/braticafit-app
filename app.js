@@ -1274,7 +1274,7 @@ async function handleHash() {
 async function openCoachMode() {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=2");
+    const m = await import("./coach.js?v=3");
     await m.openCoach({ db, user, esc, toast, ymd, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }

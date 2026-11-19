@@ -179,7 +179,7 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
       <section class="c-card">
         <h3>Add a client</h3>
         <form id="c-add" class="c-add">
-          <label><span>Name</span><input id="c-add-name" placeholder="First name" autocomplete="off"></label>
+          <label><span>Full name</span><input id="c-add-name" required placeholder="First and last name" autocomplete="off" autocapitalize="words"></label>
           <label><span>Email</span><input id="c-add-email" type="email" required placeholder="name@email.com" autocomplete="off" inputmode="email"></label>
           <button class="btn primary">Add</button>
         </form>
@@ -396,12 +396,13 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
     if (e.target.id !== "c-add") return;
     e.preventDefault();
     const email = root.querySelector("#c-add-email").value.trim().toLowerCase();
-    const name = root.querySelector("#c-add-name").value.trim() || null;
+    const name = root.querySelector("#c-add-name").value.trim().replace(/\s+/g, " ");
     if (!email) return;
+    if (name.split(" ").length < 2) return toast("Add their first and last name");
     if (email === (user.email || "").toLowerCase()) return toast("That's your coach email. Use a different one.");
     const { error } = await db.from("members").insert({ email, name });
     if (error) return toast(error.code === "23505" ? "That email is already on your list" : error.message);
-    toast(`Added ${name || email}`);
+    toast(`Added ${name}`);
     render();
   });
   root.addEventListener("change", (e) => {
