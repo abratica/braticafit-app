@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "PS Fit",
-  "short_name": "PS Fit",
+  "name": "BraticaFit",
+  "short_name": "BraticaFit",
   "description": "What I eat, and how it makes me feel.",
   "start_url": "./",
   "scope": "./",

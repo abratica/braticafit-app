@@ -35,8 +35,8 @@ jobs:
         run: |
           cat > auth.json <<JSON
           {
-            "site_url": "https://abratica.github.io/ps-fit/",
-            "uri_allow_list": "https://abratica.github.io/ps-fit/**"
+            "site_url": "https://abratica.github.io/braticafit-app/",
+            "uri_allow_list": "https://abratica.github.io/braticafit-app/**"
           }
           JSON
           CODE=$(curl -sS -X PATCH \

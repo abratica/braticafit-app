@@ -1,4 +1,4 @@
-// App API, called from the PS Fit web app by the signed-in owner.
+// App API, called from the BraticaFit web app by the signed-in owner.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { analyzeMeal } from "../_shared/food.ts";
 import { lookupBarcode } from "../_shared/barcode.ts";
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
       case "test_push": {
         const owner = await ownerId();
         const sent = await pushToUser(owner!, {
-          title: "PS Fit",
+          title: "BraticaFit",
           body: "Notifications are working.",
           url: "./",
           tag: "test",

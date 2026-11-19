@@ -197,7 +197,7 @@ h3::before { content: ""; width: 16px; height: 3px; border-radius: 2px; backgrou
 .scan-line { position: absolute; left: 12%; right: 12%; top: 50%; height: 2px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 .scan-box::after { content: ""; position: absolute; inset: 22% 10%; border: 2px solid rgba(255,255,255,.8); border-radius: 10px; }
 
-/* ---------- Sign-in (PS Fit Coaching brand) ---------- */
+/* ---------- Sign-in (BraticaFit brand) ---------- */
 body.signin {
   --brand: #fb4311; --brand-ink: #ffffff; --chalk: #f2efe9;
   background-color: #0d0d0d;
@@ -375,3 +375,5 @@ textarea.input { resize: vertical; line-height: 1.45; }
 body.has-composer { padding-bottom: calc(140px + env(safe-area-inset-bottom)); }
 a.btn { color: var(--ink); text-decoration: none; }
 a.btn.primary { color: var(--accent-ink); }
+.auth-logo.wide { width: min(320px, 82vw); filter: none; margin-bottom: 44px; }
+.wordmark { height: 50px; }

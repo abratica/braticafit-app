@@ -117,7 +117,7 @@ function renderSignIn() {
   document.body.classList.add("signin");
   app.innerHTML = `
     <div class="auth">
-      <img class="auth-logo" src="icons/logo.webp" alt="PS Fit Coaching" width="280" height="280">
+      <img class="auth-logo wide" src="icons/wordmark-lg.webp" alt="BraticaFit" width="320" height="122">
       <form id="f-email" class="auth-form">
         <label class="auth-label" for="email">Email</label>
         <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required>
@@ -125,7 +125,7 @@ function renderSignIn() {
       </form>
       <div id="sent" class="auth-sent" hidden>
         <p class="auth-head">Check your email</p>
-        <p>Tap <b>Log In</b> in the email. It opens PS Fit signed in.</p>
+        <p>Tap <b>Log In</b> in the email. It opens BraticaFit signed in.</p>
         <p class="auth-fine">Use this same phone. Didn't get it? Check spam, or <button type="button" class="auth-link" id="resend">send again</button>.</p>
       </div>
     </div>`;
@@ -1249,7 +1249,7 @@ function showInstallBar() {
   const slot = $("#install-slot");
   if (!slot || !deferredInstall || standalone()) return;
   try { if (localStorage.getItem("psh-install-x")) return; } catch {}
-  slot.innerHTML = `<div class="install-bar"><span><b>Install PS Fit</b>Logging and check-ins from your home screen</span>
+  slot.innerHTML = `<div class="install-bar"><span><b>Install BraticaFit</b>Logging and check-ins from your home screen</span>
     <button class="btn primary" id="inst">Install</button><button class="x" id="inst-x" aria-label="Not now">×</button></div>`;
   $("#inst").addEventListener("click", async () => { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; slot.innerHTML = ""; });
   $("#inst-x").addEventListener("click", () => { try { localStorage.setItem("psh-install-x", "1"); } catch {} slot.innerHTML = ""; });
@@ -1287,7 +1287,7 @@ async function enter(session) {
   const { data: owner, error } = await db.rpc("claim_owner");
   if (error || !owner) {
     $("#tabs").hidden = true;
-    app.innerHTML = `<p class="empty">This PS Fit belongs to someone else.</p><button class="btn ghost block" id="out">Sign out</button>`;
+    app.innerHTML = `<p class="empty">This BraticaFit app belongs to someone else.</p><button class="btn ghost block" id="out">Sign out</button>`;
     $("#out").addEventListener("click", () => db.auth.signOut());
     return;
   }

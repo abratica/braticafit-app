@@ -42,7 +42,7 @@ export async function pushToUser(userId: string, msg: PushMessage): Promise<numb
         subscription: { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
         message: {
           payload: msg,
-          adminContact: "https://abratica.github.io/ps-fit/",
+          adminContact: "https://abratica.github.io/braticafit-app/",
           options: { ttl: 4 * 3600, urgency: "normal", topic: msg.tag?.slice(0, 32).replace(/[^A-Za-z0-9_-]/g, "") || undefined },
         },
       });
