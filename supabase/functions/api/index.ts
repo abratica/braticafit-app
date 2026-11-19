@@ -1,10 +1,9 @@
-// App API, called from the BraticaFit web app by the signed-in owner.
+// App API, called from the BraticaFit web app by the signed-in coach or a client.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { analyzeMeal } from "../_shared/food.ts";
 import { lookupBarcode } from "../_shared/barcode.ts";
 import { vapidKeys, pushToUser } from "../_shared/push.ts";
 import { runWeekly } from "../_shared/tasks.ts";
-import { ownerId } from "../_shared/db.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "https://ktpztiyqyoalrwnqtqme.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_aUvlMasnVDO34rV8wBWnCw_oywTssOz";
@@ -17,15 +16,20 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-async function isOwner(req: Request): Promise<boolean> {
+type Caller = { id: string; role: "coach" | "client" };
+
+async function getCaller(req: Request): Promise<Caller | null> {
   const auth = req.headers.get("Authorization");
-  if (!auth) return false;
+  if (!auth) return null;
   const client = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
     global: { headers: { Authorization: auth } },
     auth: { persistSession: false },
   });
-  const { data, error } = await client.rpc("is_owner");
-  return !error && data === true;
+  const { data: { user } } = await client.auth.getUser(auth.replace(/^Bearer\s+/i, ""));
+  if (!user) return null;
+  const { data: role, error } = await client.rpc("my_role");
+  if (error || (role !== "coach" && role !== "client")) return null;
+  return { id: user.id, role };
 }
 
 Deno.serve(async (req) => {
@@ -33,7 +37,8 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method" }, 405);
 
   try {
-    if (!(await isOwner(req))) return json({ error: "unauthorized" }, 401);
+    const me = await getCaller(req);
+    if (!me) return json({ error: "unauthorized" }, 401);
     const body = await req.json().catch(() => ({}));
 
     switch (body.action) {
@@ -51,8 +56,7 @@ Deno.serve(async (req) => {
         return json({ publicKey });
       }
       case "test_push": {
-        const owner = await ownerId();
-        const sent = await pushToUser(owner!, {
+        const sent = await pushToUser(me.id, {
           title: "BraticaFit",
           body: "Notifications are working.",
           url: "./",
@@ -61,6 +65,7 @@ Deno.serve(async (req) => {
         return json({ sent });
       }
       case "weekly_now": {
+        if (me.role !== "coach") return json({ error: "unauthorized" }, 403);
         return json(await runWeekly({ notify: false }));
       }
       default:

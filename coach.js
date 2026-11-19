@@ -75,7 +75,7 @@ const IC = {
 export async function openCoach({ db, user, esc, toast, ymd, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=1"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=2"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -84,7 +84,7 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
   document.body.appendChild(root);
 
   const st = {
-    view: "dashboard", channels: [], data: {}, demos: [],
+    view: "dashboard", channels: [], data: {}, demos: [], members: [], confirmRm: null,
     lib: { channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE, tab: "videos" },
   };
 
@@ -131,18 +131,64 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
   async function render() {
     if (st.view === "dashboard") root.innerHTML = shell(await dashboard());
     else if (st.view === "library") root.innerHTML = shell(await library());
+    else if (st.view === "clients") root.innerHTML = shell(await clients());
     else root.innerHTML = shell(soon());
     root.scrollTop = 0;
   }
 
   function soon() {
-    const what = { clients: ["Clients", "Your client list, each client's settings switches, and View as."],
-      programs: ["Programs", "Templates you build once and assign as a copy with a start date."],
+    const what = { programs: ["Programs", "Templates you build once and assign as a copy with a start date."],
       inbox: ["Inbox", "Voice notes from clients, tagged by exercise and set, with your replies."],
       calls: ["Calls", "Scheduled video calls with reminders and Join inside the app."] }[st.view];
     return `<header class="c-head"><div><p class="c-eyebrow">Next up</p><h1>${what[0]}</h1></div></header>
       <section class="c-card c-empty"><p>${what[1]}</p><p class="muted">This part isn't built yet. The Library and dashboard are live.</p>
       <button class="btn primary" data-nav="library">${SVG(IC.library, 18)}Go to the Library</button></section>`;
+  }
+
+  // ---------- clients ----------
+  async function loadMembers() {
+    const { data, error } = await db.from("members").select("*").order("invited_at", { ascending: false });
+    if (error) toast(error.message);
+    st.members = data ?? [];
+  }
+  function ago(ts) {
+    if (!ts) return "";
+    const m = Math.round((Date.now() - new Date(ts)) / 60000);
+    if (m < 2) return "just now";
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.round(h / 24);
+    return d < 30 ? `${d}d ago` : new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  async function clients() {
+    await loadMembers();
+    const joined = st.members.filter((m) => m.user_id).length;
+    const rows = st.members.map((m) => {
+      const status = m.user_id
+        ? `<span class="c-pill on">Joined</span><span class="c-vm">Active ${esc(ago(m.last_seen_at || m.joined_at))}</span>`
+        : `<span class="c-pill">Invited</span><span class="c-vm">${esc(ago(m.invited_at))}</span>`;
+      const confirming = st.confirmRm === m.id;
+      return `<li class="c-client">
+        <div class="c-client-who"><b>${esc(m.name || m.email)}</b>${m.name ? `<span class="c-vm">${esc(m.email)}</span>` : ""}</div>
+        <div class="c-client-status">${status}</div>
+        <button class="btn ${confirming ? "primary" : "ghost"} c-rm" data-rm="${m.id}">${confirming ? "Tap again to remove" : "Remove"}</button>
+      </li>`;
+    }).join("");
+    return `<header class="c-head"><div><p class="c-eyebrow">${joined} joined · ${st.members.length - joined} invited</p><h1>Clients</h1></div></header>
+      <section class="c-card">
+        <h3>Add a client</h3>
+        <form id="c-add" class="c-add">
+          <label><span>Name</span><input id="c-add-name" placeholder="First name" autocomplete="off"></label>
+          <label><span>Email</span><input id="c-add-email" type="email" required placeholder="name@email.com" autocomplete="off" inputmode="email"></label>
+          <button class="btn primary">Add</button>
+        </form>
+        <p class="c-vm" style="margin:12px 0 0">They sign in at the app with this email. Until you add them, that email can't get in.</p>
+      </section>
+      <section class="c-card">
+        <h3>Your clients</h3>
+        ${st.members.length ? `<ul class="c-clients">${rows}</ul>` : `<p class="c-empty-line">No clients yet. Add one above.</p>`}
+      </section>`;
   }
 
   // ---------- dashboard ----------
@@ -330,6 +376,14 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
     if (t.id === "c-clean") { st.lib.clean = !st.lib.clean; st.lib.shown = PAGE; return render(); }
     if (t.id === "c-more") { st.lib.shown += PAGE; return render(); }
     if (t.dataset.vid) return openPlayer(t.dataset.vid);
+    if (t.dataset.rm) {
+      if (st.confirmRm !== t.dataset.rm) { st.confirmRm = t.dataset.rm; return render(); }
+      const { error } = await db.from("members").delete().eq("id", t.dataset.rm);
+      st.confirmRm = null;
+      if (error) return toast(error.message);
+      toast("Removed. Their logs are kept.");
+      return render();
+    }
     if (t.dataset.del) {
       await db.from("coach_demos").delete().eq("id", t.dataset.del);
       await loadDemos();
@@ -337,6 +391,18 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
       toast("Removed");
       return render();
     }
+  });
+  root.addEventListener("submit", async (e) => {
+    if (e.target.id !== "c-add") return;
+    e.preventDefault();
+    const email = root.querySelector("#c-add-email").value.trim().toLowerCase();
+    const name = root.querySelector("#c-add-name").value.trim() || null;
+    if (!email) return;
+    if (email === (user.email || "").toLowerCase()) return toast("That's your coach email. Use a different one.");
+    const { error } = await db.from("members").insert({ email, name });
+    if (error) return toast(error.code === "23505" ? "That email is already on your list" : error.message);
+    toast(`Added ${name || email}`);
+    render();
   });
   root.addEventListener("change", (e) => {
     if (e.target.id === "c-sort") { st.lib.sort = e.target.value; st.lib.shown = PAGE; render(); }

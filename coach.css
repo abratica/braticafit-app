@@ -152,6 +152,23 @@ body.coach-on .top, body.coach-on .bottom-nav, body.coach-on #app { display: non
 .c-saved-line { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: var(--ink); }
 .c-saved-line svg { color: var(--accent); fill: var(--accent); }
 
+/* Clients */
+.c-add { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.c-add label { flex: 1 1 220px; }
+.c-add label span { display: block; font: 500 12px/1 var(--display); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); margin-bottom: 8px; }
+.c-add input { width: 100%; box-sizing: border-box; height: 46px; padding: 0 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); color: var(--ink); font: 16px Inter, sans-serif; }
+.c-add input:focus { outline: none; border-color: var(--accent); }
+.c-add .btn { height: 46px; padding: 0 22px; }
+.c-clients { list-style: none; margin: 0; padding: 0; }
+.c-client { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 0; border-top: 1px solid var(--line); }
+.c-client:first-child { border-top: 0; padding-top: 0; }
+.c-client-who { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.c-client-who b { font-size: 15px; overflow-wrap: anywhere; }
+.c-client-status { display: flex; align-items: center; gap: 10px; }
+.c-pill { font: 500 11px/1 var(--display); text-transform: uppercase; letter-spacing: .14em; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.c-pill.on { border-color: var(--accent); color: var(--accent); }
+.c-rm { min-height: 40px; padding: 0 14px; font-size: 13px; }
+
 /* Coach entry in Settings */
 .coach-entry { display: flex; align-items: center; gap: 12px; }
 .coach-entry .main { flex: 1; }

@@ -12,9 +12,6 @@ const fmtWhen = (d: Date) =>
 // Check-ins: ~2 hours after each logged meal
 // ---------------------------------------------------------------------------
 export async function runCheckins() {
-  const owner = await ownerId();
-  if (!owner) return { skipped: "no owner" };
-
   // Too old to ask about: retire quietly (still answerable in the app).
   await sql`update public.meals set checkin_pushed = true
             where checkin_pushed = false and eaten_at < now() - interval '6 hours'`;
@@ -22,15 +19,18 @@ export async function runCheckins() {
   const hour = hourInBoston();
   if (hour >= 22 || hour < 8) return { skipped: "quiet hours" };
 
+  // Everyone with access: the coach plus clients who have joined.
   const due = await sql`
-    select id, name from public.meals
-    where user_id = ${owner} and checkin_pushed = false and checkin_due_at <= now()
+    select id, name, user_id from public.meals
+    where checkin_pushed = false and checkin_due_at <= now()
       and energy is null and stomach is null
+      and (user_id::text = (select value from private.config where key = 'owner_id')
+           or user_id in (select user_id from public.members where user_id is not null))
     order by eaten_at`;
   let sent = 0;
   for (const m of due) {
     await sql`update public.meals set checkin_pushed = true where id = ${m.id}`;
-    sent += await pushToUser(owner, {
+    sent += await pushToUser(m.user_id, {
       title: "How do you feel?",
       body: `About 2 hours after ${m.name}. Tap to check in.`,
       url: `./#checkin=${m.id}`,

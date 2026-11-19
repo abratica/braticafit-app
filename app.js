@@ -665,7 +665,7 @@ async function renderProgress() {
       <form id="wf" class="wt-form"><input class="input" id="wt" type="number" inputmode="decimal" step="0.1" placeholder="lb" aria-label="Weight in pounds" required><button class="btn">Log</button></form>
     </div>
 
-    <h3>Summaries & patterns</h3>
+    ${isCoach ? `<h3>Summaries & patterns</h3>
     ${meals.length ? `<button class="btn ghost block" id="gen" style="margin-bottom:10px">Write my summary now</button>` : ""}
     ${(obs ?? []).length ? obs.map((o) => `
       <button class="card obs row ${o.read_at ? "" : "unread"}" data-obs="${o.id}" style="display:block">
@@ -673,7 +673,7 @@ async function renderProgress() {
         <div class="title">${esc(o.title)}</div>
         <div class="small muted">${esc(o.short)}</div>
       </button>`).join("")
-    : `<p class="empty">Your first weekly summary arrives Sunday morning. Patterns show up once something repeats a few times in your check-ins.</p>`}`;
+    : `<p class="empty">Your first weekly summary arrives Sunday morning. Patterns show up once something repeats a few times in your check-ins.</p>`}` : ""}`;
 
   $("#wf").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1153,7 +1153,7 @@ async function refreshDot() {
 // ---------------------------------------------------------------------------
 async function renderSettings() {
   $("#sub").textContent = "Settings";
-  const { data: labs } = await db.from("labs").select("*").order("taken_on", { ascending: false }).limit(10);
+  const { data: labs } = isCoach ? await db.from("labs").select("*").order("taken_on", { ascending: false }).limit(10) : { data: [] };
   const pushState = await pushStatus();
 
   app.innerHTML = `
@@ -1163,14 +1163,14 @@ async function renderSettings() {
       <button class="btn primary" id="coach-open">Open</button></div>` : ""}
     <h3>Notifications</h3>
     <div class="card">
-      <p class="small" style="margin-top:0">Check-ins about 2 hours after you eat (not between 10pm and 8am), patterns when they show up, and your Sunday summary.</p>
+      <p class="small" style="margin-top:0">${isCoach ? "Check-ins about 2 hours after you eat (not between 10pm and 8am), patterns when they show up, and your Sunday summary." : "Check-ins about 2 hours after you eat (not between 10pm and 8am)."}</p>
       ${pushState === "unsupported" ? `<p class="small muted">This browser can't receive notifications. Install the app to your home screen from Chrome first.</p>`
         : pushState === "denied" ? `<p class="small muted">Notifications are blocked. Allow them in your browser's site settings for this app.</p>`
         : pushState === "on" ? `<p class="small" style="color:var(--good)">On for this device.</p><button class="btn ghost block" id="test">Send a test</button>`
         : `<button class="btn primary block" id="push">Turn on notifications</button>`}
     </div>
 
-    <h3>Lab results</h3>
+    ${isCoach ? `<h3>Lab results</h3>
     <div class="card">
       <form id="lf">
         <label class="field"><span>Test date</span><input class="input" id="ld" type="date" required value="${ymd()}"></label>
@@ -1186,7 +1186,7 @@ async function renderSettings() {
         <li class="row" style="cursor:default"><div class="main"><div class="name">LDL ${l.ldl ?? "–"} · HDL ${l.hdl ?? "–"}</div>
         <div class="meta">Triglycerides ${l.triglycerides ?? "–"} · total ${l.total_chol ?? "–"}</div></div>
         <div class="end">${dayFmt.format(new Date(l.taken_on + "T12:00"))}</div></li>`).join("")}</ul>` : ""}
-    </div>
+    </div>` : ""}
 
     <button class="btn ghost block" id="out" style="margin-top:18px">Sign out</button>
   `;
@@ -1196,7 +1196,7 @@ async function renderSettings() {
     try { const r = await api("test_push"); toast(r.sent ? "Sent. It should pop up in a moment." : "No devices subscribed yet"); }
     catch (e) { toast(e.message); }
   });
-  $("#lf").addEventListener("submit", async (e) => {
+  $("#lf")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const v = (id) => ($(id).value === "" ? null : Number($(id).value));
     const row = { taken_on: $("#ld").value, ldl: v("#l-ldl"), hdl: v("#l-hdl"), triglycerides: v("#l-tg"), total_chol: v("#l-tc") };
@@ -1232,10 +1232,7 @@ async function enablePush() {
     let sub = await reg.pushManager.getSubscription();
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
     const j = sub.toJSON();
-    const { error } = await db.from("push_subscriptions").upsert(
-      { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth },
-      { onConflict: "endpoint" },
-    );
+    const { error } = await db.rpc("save_push", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
     if (error) throw error;
     toast("Notifications are on");
   } catch (e) {
@@ -1277,7 +1274,7 @@ async function handleHash() {
 async function openCoachMode() {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=1");
+    const m = await import("./coach.js?v=2");
     await m.openCoach({ db, user, esc, toast, ymd, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
@@ -1298,18 +1295,33 @@ async function enter(session) {
   user = session?.user ?? null;
   if (!user) return renderSignIn();
   document.body.classList.remove("signin");
-  const { data: owner, error } = await db.rpc("claim_owner");
-  if (error || !owner) {
+  const { data: role, error } = await db.rpc("join_app");
+  if (error || !role) {
+    isCoach = false;
     $("#tabs").hidden = true;
-    app.innerHTML = `<p class="empty">This BraticaFit app belongs to someone else.</p><button class="btn ghost block" id="out">Sign out</button>`;
+    $("#settings").hidden = true;
+    app.innerHTML = `<p class="empty">${esc(user.email ?? "This account")} doesn't have access yet. If you're a BraticaFit client, ask Andrew to add this email.</p><button class="btn ghost block" id="out">Sign out</button>`;
     $("#out").addEventListener("click", () => db.auth.signOut());
     return;
   }
-  isCoach = !!owner;
+  isCoach = role === "coach";
+  claimThisDevice();
   $("#tabs").hidden = false;
   $("#settings").hidden = false;
   if (!(await handleHash())) await go(tab);
   refreshDot();
+}
+
+// If this device already gets notifications, point them at whoever is signed in now.
+async function claimThisDevice() {
+  try {
+    if (!("serviceWorker" in navigator) || Notification.permission !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    const j = sub.toJSON();
+    await db.rpc("save_push", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+  } catch {}
 }
 
 let lastUserId;
