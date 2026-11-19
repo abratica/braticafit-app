@@ -51,7 +51,7 @@ jobs:
       - name: Connect email (Resend) when the key is set
         run: |
           if [ -z "$RESEND_API_KEY" ]; then echo "RESEND_API_KEY not set yet; skipping email setup"; exit 0; fi
-          supabase secrets set --project-ref "$PROJECT_REF" RESEND_API_KEY="$RESEND_API_KEY"
+          supabase secrets set --project-ref "$PROJECT_REF" --yes RESEND_API_KEY="$RESEND_API_KEY"
           jq -n --arg pass "$RESEND_API_KEY" --rawfile tpl supabase/templates/signin.html '{
             smtp_admin_email: "andrew@braticafit.com",
             smtp_sender_name: "Andrew from BraticaFit",
