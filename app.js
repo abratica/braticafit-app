@@ -16,6 +16,7 @@ const STOMACH = [["great", "Great"], ["fine", "Fine"], ["bloated", "Bloated"], [
 
 let user = null;
 let tab = "today";
+let isCoach = false;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1157,6 +1158,9 @@ async function renderSettings() {
 
   app.innerHTML = `
     <p class="small muted" style="margin:6px 2px 0">${esc(user?.email ?? "")}</p>
+    ${isCoach ? `<h3>Coach</h3>
+    <div class="card coach-entry"><div class="main"><b>Coach mode</b><div class="small muted">Dashboard and exercise Library. Best on your laptop.</div></div>
+      <button class="btn primary" id="coach-open">Open</button></div>` : ""}
     <h3>Notifications</h3>
     <div class="card">
       <p class="small" style="margin-top:0">Check-ins about 2 hours after you eat (not between 10pm and 8am), patterns when they show up, and your Sunday summary.</p>
@@ -1186,6 +1190,7 @@ async function renderSettings() {
 
     <button class="btn ghost block" id="out" style="margin-top:18px">Sign out</button>
   `;
+  $("#coach-open")?.addEventListener("click", openCoachMode);
   $("#push")?.addEventListener("click", enablePush);
   $("#test")?.addEventListener("click", async () => {
     try { const r = await api("test_push"); toast(r.sent ? "Sent. It should pop up in a moment." : "No devices subscribed yet"); }
@@ -1260,12 +1265,21 @@ function showInstallBar() {
 // ---------------------------------------------------------------------------
 async function handleHash() {
   const h = location.hash.slice(1);
+  if (h === "coach" && user && isCoach) { history.replaceState(null, "", location.pathname + location.search); await go(tab); openCoachMode(); return true; }
   if (!h || !user || !/^(checkin|obs)=/.test(h)) return false;
   history.replaceState(null, "", location.pathname + location.search);
   const [k, v] = h.split("=");
   if (k === "checkin" && v) { tab = "today"; markTab(); await renderHome(v); return true; }
   if (k === "obs" && v) { tab = "progress"; markTab(); await renderProgress(); openObservation(v); return true; }
   return false;
+}
+// Coach mode lives in coach.js and is only fetched for the coach's account.
+async function openCoachMode() {
+  if (!isCoach) return;
+  try {
+    const m = await import("./coach.js?v=1");
+    await m.openCoach({ db, user, esc, toast, ymd, exit: () => go(tab) });
+  } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
 function markTab() {
   for (const b of document.querySelectorAll("#tabs button")) {
@@ -1291,6 +1305,7 @@ async function enter(session) {
     $("#out").addEventListener("click", () => db.auth.signOut());
     return;
   }
+  isCoach = !!owner;
   $("#tabs").hidden = false;
   $("#settings").hidden = false;
   if (!(await handleHash())) await go(tab);

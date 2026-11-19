@@ -377,3 +377,5 @@ a.btn { color: var(--ink); text-decoration: none; }
 a.btn.primary { color: var(--accent-ink); }
 .auth-logo.wide { width: min(320px, 82vw); filter: none; margin-bottom: 44px; }
 .wordmark { height: 50px; }
+.coach-entry { display: flex; align-items: center; gap: 12px; }
+.coach-entry .main { flex: 1; }
