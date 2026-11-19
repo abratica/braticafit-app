@@ -169,6 +169,15 @@ body.coach-on .top, body.coach-on .bottom-nav, body.coach-on #app { display: non
 .c-pill.on { border-color: var(--accent); color: var(--accent); }
 .c-rm { min-height: 40px; padding: 0 14px; font-size: 13px; }
 
+.c-check { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; cursor: pointer; }
+.c-check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.c-mail { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.c-mail label span { display: block; font: 500 12px/1 var(--display); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); margin-bottom: 8px; }
+.c-mail input, .c-mail textarea { width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); color: var(--ink); font: 15px/1.5 Inter, sans-serif; }
+.c-mail textarea { resize: vertical; min-height: 220px; }
+.c-mail input:focus, .c-mail textarea:focus { outline: none; border-color: var(--accent); }
+.c-mail-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
 /* Coach entry in Settings */
 .coach-entry { display: flex; align-items: center; gap: 12px; }
 .coach-entry .main { flex: 1; }

@@ -72,10 +72,10 @@ const IC = {
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
 };
 
-export async function openCoach({ db, user, esc, toast, ymd, exit }) {
+export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=2"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=3"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -84,7 +84,7 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
   document.body.appendChild(root);
 
   const st = {
-    view: "dashboard", channels: [], data: {}, demos: [], members: [], confirmRm: null,
+    view: "dashboard", channels: [], data: {}, demos: [], members: [], confirmRm: null, mail: null,
     lib: { channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE, tab: "videos" },
   };
 
@@ -161,17 +161,48 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
     const d = Math.round(h / 24);
     return d < 30 ? `${d}d ago` : new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
+  async function loadMail() {
+    if (st.mail) return;
+    let status = { configured: false, defaults: { subject: "", body: "" } };
+    try { status = await api("email_status"); } catch {}
+    const { data } = await db.from("coach_settings").select("key,value").in("key", ["welcome_subject", "welcome_body"]);
+    const saved = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]));
+    st.mail = { configured: status.configured, subject: saved.welcome_subject ?? status.defaults.subject, body: saved.welcome_body ?? status.defaults.body, open: false };
+  }
+  async function sendWelcome(memberId, label) {
+    try {
+      await api("welcome", { member_id: memberId });
+      toast(`Welcome email sent to ${label}`);
+    } catch (e) { toast(e.message || "Couldn't send the email"); }
+  }
+  function mailCard() {
+    const M = st.mail;
+    return `<section class="c-card">
+        <div class="c-card-head"><h3>Welcome email</h3><button class="c-link" id="c-mail-toggle">${M.open ? "Close" : "Edit"}</button></div>
+        <p class="c-vm" style="margin:0">${M.configured ? "Sent from andrew@braticafit.com when you add a client." : "Email isn't connected yet. Your wording saves now and sends once it is."}
+          Use <b>{first name}</b> for their name and <b>{button}</b> for the Open BraticaFit button.</p>
+        ${M.open ? `<form id="c-mail" class="c-mail">
+          <label><span>Subject</span><input id="c-mail-subject" value="${esc(M.subject)}" required></label>
+          <label><span>Message</span><textarea id="c-mail-body" rows="11" required>${esc(M.body)}</textarea></label>
+          <div class="c-mail-actions"><button class="btn primary">Save</button>
+            <button type="button" class="btn ghost" id="c-mail-test" ${M.configured ? "" : "disabled"}>Send me a test</button></div>
+        </form>` : ""}
+      </section>`;
+  }
   async function clients() {
-    await loadMembers();
+    await Promise.all([loadMembers(), loadMail()]);
     const joined = st.members.filter((m) => m.user_id).length;
     const rows = st.members.map((m) => {
       const status = m.user_id
         ? `<span class="c-pill on">Joined</span><span class="c-vm">Active ${esc(ago(m.last_seen_at || m.joined_at))}</span>`
-        : `<span class="c-pill">Invited</span><span class="c-vm">${esc(ago(m.invited_at))}</span>`;
+        : `<span class="c-pill">Invited</span><span class="c-vm">${m.welcomed_at ? `Welcome sent ${esc(ago(m.welcomed_at))}` : `Added ${esc(ago(m.invited_at))}`}</span>`;
+      const welcomeBtn = !m.user_id && st.mail.configured
+        ? `<button class="btn ghost c-rm" data-welcome="${m.id}">${m.welcomed_at ? "Resend welcome" : "Send welcome"}</button>` : "";
       const confirming = st.confirmRm === m.id;
       return `<li class="c-client">
         <div class="c-client-who"><b>${esc(m.name || m.email)}</b>${m.name ? `<span class="c-vm">${esc(m.email)}</span>` : ""}</div>
         <div class="c-client-status">${status}</div>
+        ${welcomeBtn}
         <button class="btn ${confirming ? "primary" : "ghost"} c-rm" data-rm="${m.id}">${confirming ? "Tap again to remove" : "Remove"}</button>
       </li>`;
     }).join("");
@@ -183,8 +214,10 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
           <label><span>Email</span><input id="c-add-email" type="email" required placeholder="name@email.com" autocomplete="off" inputmode="email"></label>
           <button class="btn primary">Add</button>
         </form>
-        <p class="c-vm" style="margin:12px 0 0">They sign in at the app with this email. Until you add them, that email can't get in.</p>
+        <label class="c-check"><input type="checkbox" id="c-add-welcome" ${st.mail.configured ? "checked" : "disabled"}> Send them the welcome email</label>
+        <p class="c-vm" style="margin:8px 0 0">They sign in at the app with this email. Until you add them, that email can't get in.</p>
       </section>
+      ${mailCard()}
       <section class="c-card">
         <h3>Your clients</h3>
         ${st.members.length ? `<ul class="c-clients">${rows}</ul>` : `<p class="c-empty-line">No clients yet. Add one above.</p>`}
@@ -376,6 +409,21 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
     if (t.id === "c-clean") { st.lib.clean = !st.lib.clean; st.lib.shown = PAGE; return render(); }
     if (t.id === "c-more") { st.lib.shown += PAGE; return render(); }
     if (t.dataset.vid) return openPlayer(t.dataset.vid);
+    if (t.dataset.welcome) {
+      const m = st.members.find((x) => x.id === t.dataset.welcome);
+      t.disabled = true;
+      await sendWelcome(t.dataset.welcome, m?.name || m?.email || "them");
+      return render();
+    }
+    if (t.id === "c-mail-toggle") { st.mail.open = !st.mail.open; return render(); }
+    if (t.id === "c-mail-test") {
+      t.disabled = true;
+      await saveMail(false);
+      try { const r = await api("welcome", { test: true }); toast(`Test sent to ${r.sent}`); }
+      catch (err) { toast(err.message || "Couldn't send the test"); }
+      t.disabled = false;
+      return;
+    }
     if (t.dataset.rm) {
       if (st.confirmRm !== t.dataset.rm) { st.confirmRm = t.dataset.rm; return render(); }
       const { error } = await db.from("members").delete().eq("id", t.dataset.rm);
@@ -392,7 +440,21 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
       return render();
     }
   });
+  async function saveMail(announce = true) {
+    const subject = root.querySelector("#c-mail-subject")?.value.trim();
+    const body = root.querySelector("#c-mail-body")?.value.replace(/\r\n/g, "\n").trim();
+    if (!subject || !body) return toast("Add a subject and a message");
+    const now = new Date().toISOString();
+    const { error } = await db.from("coach_settings").upsert([
+      { key: "welcome_subject", value: subject, updated_at: now },
+      { key: "welcome_body", value: body, updated_at: now },
+    ]);
+    if (error) return toast(error.message);
+    Object.assign(st.mail, { subject, body });
+    if (announce) toast("Welcome email saved");
+  }
   root.addEventListener("submit", async (e) => {
+    if (e.target.id === "c-mail") { e.preventDefault(); return saveMail(); }
     if (e.target.id !== "c-add") return;
     e.preventDefault();
     const email = root.querySelector("#c-add-email").value.trim().toLowerCase();
@@ -400,9 +462,11 @@ export async function openCoach({ db, user, esc, toast, ymd, exit }) {
     if (!email) return;
     if (name.split(" ").length < 2) return toast("Add their first and last name");
     if (email === (user.email || "").toLowerCase()) return toast("That's your coach email. Use a different one.");
-    const { error } = await db.from("members").insert({ email, name });
+    const welcome = root.querySelector("#c-add-welcome")?.checked;
+    const { data: row, error } = await db.from("members").insert({ email, name }).select("id").single();
     if (error) return toast(error.code === "23505" ? "That email is already on your list" : error.message);
-    toast(`Added ${name}`);
+    if (welcome) await sendWelcome(row.id, name);
+    else toast(`Added ${name}`);
     render();
   });
   root.addEventListener("change", (e) => {

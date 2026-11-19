@@ -121,7 +121,7 @@ function renderSignIn() {
       <img class="auth-logo wide" src="icons/wordmark-lg.webp" alt="BraticaFit" width="320" height="122">
       <form id="f-email" class="auth-form">
         <label class="auth-label" for="email">Email</label>
-        <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required>
+        <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required value="${esc(new URLSearchParams(location.search).get("email") || "")}">
         <button class="auth-btn">Send my sign-in link</button>
       </form>
       <div id="sent" class="auth-sent" hidden>
@@ -1274,8 +1274,8 @@ async function handleHash() {
 async function openCoachMode() {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=3");
-    await m.openCoach({ db, user, esc, toast, ymd, exit: () => go(tab) });
+    const m = await import("./coach.js?v=4");
+    await m.openCoach({ db, user, esc, toast, ymd, api, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
 function markTab() {
