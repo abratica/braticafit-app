@@ -1,6 +1,6 @@
 // App API, called from the BraticaFit web app by the signed-in coach or a client.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { analyzeMeal } from "../_shared/food.ts";
+import { analyzeMeal, searchFoods } from "../_shared/food.ts";
 import { lookupBarcode } from "../_shared/barcode.ts";
 import { vapidKeys, pushToUser } from "../_shared/push.ts";
 import { runWeekly } from "../_shared/tasks.ts";
@@ -110,6 +110,21 @@ Deno.serve(async (req) => {
         if (!body.image && !body.text) return json({ error: "Send a photo or a description" }, 400);
         const result = await analyzeMeal({ image: body.image, mediaType: body.mediaType, text: body.text });
         return json(result);
+      }
+      case "food_search": {
+        const q = String(body.q ?? "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 80);
+        if (q.length < 2) return json({ results: [] });
+        const cached = await sql`select results from public.food_search_cache where q = ${q} and created_at > now() - interval '30 days'`;
+        if (cached.length) return json({ results: cached[0].results });
+        try {
+          const results = await searchFoods(q);
+          await sql`insert into public.food_search_cache (q, results) values (${q}, ${sql.json(results)})
+                    on conflict (q) do update set results = excluded.results, created_at = now()`;
+          return json({ results });
+        } catch (e) {
+          if ((e as Error).message === "rate_limited") return json({ results: [], busy: true });
+          throw e;
+        }
       }
       case "barcode": {
         if (!body.code) return json({ error: "Send a barcode" }, 400);

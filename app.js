@@ -236,6 +236,7 @@ const player = (id) => `<div class="player"><iframe src="https://www.youtube-noc
   title="Workout video" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
 
 const ICO = {
+  search: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>`,
   play: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></svg>`,
   check: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`,
   video: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>`,
@@ -300,7 +301,7 @@ async function renderHome(highlightId) {
     <div class="log-row">
       <button class="btn" id="snap">${ICO.camera}Snap</button>
       <button class="btn" id="scan">${ICO.scan}Scan</button>
-      <button class="btn" id="type">${ICO.type}Type</button>
+      <button class="btn" id="type">${ICO.search}Search</button>
     </div>
     ${(pending ?? []).length ? `<h3>How do you feel?</h3>${pending.map(checkinCard).join("")}` : ""}
     <h3>Daily recap</h3>
@@ -313,7 +314,7 @@ async function renderHome(highlightId) {
   app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
   $("#plan")?.addEventListener("click", () => openPlanner());
   $("#snap").addEventListener("click", () => { logTo = { day: null, meal: null }; $("#camera").click(); });
-  $("#type").addEventListener("click", () => { logTo = { day: null, meal: null }; openTextLog(); });
+  $("#type").addEventListener("click", () => { logTo = { day: null, meal: null }; openSearch(); });
   $("#scan").addEventListener("click", () => { logTo = { day: null, meal: null }; openScanner(); });
   $("#recap").addEventListener("click", openRecap);
   bindCheckins(app, () => renderHome());
@@ -740,7 +741,7 @@ async function renderFood() {
     <div class="log-actions" style="margin-top:12px">
       <button class="btn primary wide" id="snap">${ICO.camera}Snap food</button>
       <button class="btn" id="scan">${ICO.scan}Scan barcode</button>
-      <button class="btn" id="type">${ICO.type}Type it</button>
+      <button class="btn" id="type">${ICO.search}Search</button>
     </div>
     <h3>${isToday ? "Today, roughly" : `${dayFmt.format(day)}, roughly`}</h3>
     ${goal ? targetCard(goal, t) : `<div class="card">
@@ -754,7 +755,7 @@ async function renderFood() {
   $("#set-targets")?.addEventListener("click", openTargets);
   $("#edit-targets")?.addEventListener("click", openTargets);
   $("#snap").addEventListener("click", () => { logTo = here(); $("#camera").click(); });
-  $("#type").addEventListener("click", () => { logTo = here(); openTextLog(); });
+  $("#type").addEventListener("click", () => { logTo = here(); openSearch(); });
   $("#scan").addEventListener("click", () => { logTo = here(); openScanner(); });
   $("#back-today")?.addEventListener("click", () => { foodDay = null; renderFood(); });
   app.querySelector(".wk").addEventListener("click", (e) => {
@@ -776,7 +777,7 @@ function openMealAdd(meal) {
     <div class="add-grid">
       <button class="btn" data-how="snap">${ICO.camera}Snap</button>
       <button class="btn" data-how="scan">${ICO.scan}Scan</button>
-      <button class="btn" data-how="type">${ICO.type}Type</button>
+      <button class="btn" data-how="type">${ICO.search}Search</button>
       <button class="btn" data-how="mine">My foods</button>
     </div>`);
   body.addEventListener("click", (e) => {
@@ -786,7 +787,7 @@ function openMealAdd(meal) {
     const how = b.dataset.how;
     if (how === "snap") { closeSheet(); $("#camera").click(); }
     if (how === "scan") openScanner();
-    if (how === "type") openTextLog();
+    if (how === "type") openSearch();
     if (how === "mine") { closeSheet(); foodSeg = "mine"; renderFood(); }
   });
 }
@@ -1201,6 +1202,144 @@ function openTextLog() {
     e.preventDefault();
     const text = $("#tx", body).value.trim();
     if (text) analyze({ text }, { source: "text" });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Search: My foods instantly, then the USDA database; "Describe it" for mixed meals
+// ---------------------------------------------------------------------------
+function openSearch() {
+  const body = openSheet(`
+    <h2>Search foods</h2>
+    <label class="search s-big">${ICO.search}<input id="sq" type="search" placeholder="Greek yogurt, banana, Chobani…" autocomplete="off" enterkeyhint="search"></label>
+    <div id="sr"></div>
+    <button class="btn block" id="describe" style="margin-top:14px">${ICO.type}Describe it instead</button>
+    <p class="small muted" style="text-align:center;margin-top:8px">Best for mixed or homemade meals, like "burrito bowl with rice and beans".</p>`);
+  const input = $("#sq", body);
+  let mine = [], hits = null, state = "idle", timer = null, seq = 0;
+
+  const kcalLine = (h) => {
+    const s = h.servings[0];
+    return s ? `${r0((h.per100.kcal * s.grams) / 100)} cal · ${esc(s.label)}` : `${r0(h.per100.kcal)} cal · 100 g`;
+  };
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    const my = (q ? mine.filter((f) => f.name.toLowerCase().includes(q)) : mine).slice(0, q ? 6 : 8);
+    let html = "";
+    if (my.length) html += `<h3>${q ? "My foods" : "Recent"}</h3><div class="card s-list"><ul class="list">${my.map((f) => `
+      <li><button class="row" data-mine="${f.id}">
+        <div class="thumb" ${f.thumb ? `style="background-image:url('${f.thumb}')"` : ""}>${f.thumb ? "" : "🍽"}</div>
+        <div class="main"><div class="name">${esc(f.name)}</div><div class="meta">${macroLine(f.nutrients)}</div></div>
+      </button></li>`).join("")}</ul></div>`;
+    if (q.length >= 2) {
+      html += `<h3>Food database</h3>`;
+      if (state === "loading") html += `<p class="small muted">Searching…</p>`;
+      else if (state === "busy") html += `<p class="small muted">The food database is busy right now. Try again in a bit, or describe it instead.</p>`;
+      else if (state === "error") html += `<p class="small muted">Couldn't search right now. Describe it instead, or try again.</p>`;
+      else if (hits?.length) html += `<div class="card s-list"><ul class="list">${hits.map((h, i) => `
+        <li><button class="row" data-hit="${i}">
+          <div class="main"><div class="name">${esc(h.name)}</div>
+          <div class="meta">${h.brand ? `<b>${esc(h.brand)}</b> · ` : ""}${kcalLine(h)}</div></div>
+          <div class="end">›</div>
+        </button></li>`).join("")}</ul></div>`;
+      else if (state === "done") html += `<p class="small muted">No matches. Try fewer words, or describe it instead.</p>`;
+    } else if (!my.length) html += `<p class="small muted" style="margin-top:12px">Start typing to search.</p>`;
+    $("#sr", body).innerHTML = html;
+  };
+
+  db.from("foods").select("*").order("last_logged_at", { ascending: false, nullsFirst: false }).limit(300)
+    .then(({ data }) => { mine = data ?? []; draw(); });
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { state = "idle"; hits = null; return draw(); }
+    state = "loading";
+    draw();
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      try {
+        const r = await api("food_search", { q });
+        if (my !== seq) return;
+        hits = r.results ?? [];
+        state = r.busy ? "busy" : "done";
+      } catch { if (my === seq) state = "error"; }
+      if (my === seq) draw();
+    }, 450);
+  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+  $("#sr", body).addEventListener("click", (e) => {
+    const m = e.target.closest("[data-mine]");
+    if (m) return openFood(mine.find((f) => f.id === m.dataset.mine));
+    const h = e.target.closest("[data-hit]");
+    if (h) return openDbFood(hits[Number(h.dataset.hit)]);
+  });
+  $("#describe", body).addEventListener("click", () => {
+    const text = input.value.trim();
+    if (text.length > 2) analyze({ text }, { source: "text" });
+    else openTextLog();
+  });
+  setTimeout(() => input.focus(), 50);
+}
+
+// A database result: pick the serving and how many, then which meal.
+function openDbFood(hit) {
+  const opts = [...hit.servings, { label: "100 g", grams: 100 }, { label: "Grams", grams: 1, custom: true }];
+  let sel = 0;
+  const body = openSheet(`
+    <h2>${esc(hit.name)}</h2>
+    ${hit.brand ? `<p class="muted small" style="margin-top:-4px">${esc(hit.brand)}</p>` : ""}
+    <div class="grid2">
+      <label class="field"><span>Serving</span><select class="input" id="ds">${opts.map((o, i) => `<option value="${i}">${esc(o.label)}</option>`).join("")}</select></label>
+      <label class="field"><span id="dq-l">How many</span><input class="input" id="dq" type="number" inputmode="decimal" min="0.25" step="0.25" value="1"></label>
+    </div>
+    ${mealPickerHtml()}
+    <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${defaultWhen()}"></label>
+    <div class="card totals" id="tot"></div>
+    <button class="btn primary block" id="log">Log it</button>
+    <p class="small muted" style="text-align:center;margin-top:8px">From the USDA food database. It'll be saved to My foods too.</p>`);
+  const qty = () => Math.max(0, Number($("#dq", body).value) || 0);
+  const grams = () => (opts[sel].custom ? qty() : opts[sel].grams * qty());
+  const draw = () => {
+    const t = Object.fromEntries(KEYS.map((k) => [k, ((hit.per100[k] ?? 0) * grams()) / 100]));
+    $("#tot", body).innerHTML = `
+      <div><b>${r0(t.kcal)}</b><span>calories</span></div><div><b>${r0(t.protein)}g</b><span>protein</span></div>
+      <div><b>${r0(t.carbs)}g</b><span>carbs</span></div><div><b>${r0(t.fat)}g</b><span>fat</span></div>`;
+  };
+  $("#ds", body).addEventListener("change", (e) => {
+    sel = Number(e.target.value);
+    const custom = !!opts[sel].custom;
+    $("#dq-l", body).textContent = custom ? "Grams" : "How many";
+    $("#dq", body).value = custom ? 100 : 1;
+    $("#dq", body).step = custom ? 1 : 0.25;
+    draw();
+  });
+  $("#dq", body).addEventListener("input", draw);
+  draw();
+  const pickedMeal = bindMealPicker(body);
+  $("#log", body).addEventListener("click", async () => {
+    if (!(grams() > 0)) return toast("Enter an amount");
+    const meal = pickedMeal();
+    if (!meal) return;
+    $("#log", body).disabled = true;
+    const custom = !!opts[sel].custom;
+    const g = custom ? qty() : opts[sel].grams;
+    const servings = custom ? 1 : qty();
+    const label = custom ? `${r0(g)} g` : opts[sel].label;
+    const perGram = Object.fromEntries(KEYS.map((k) => [k, (hit.per100[k] ?? 0) / 100]));
+    const per = Object.fromEntries(KEYS.map((k) => [k, perGram[k] * g]));
+    const name = hit.brand ? `${hit.name} (${hit.brand})` : hit.name;
+    // Same food and serving as before? Reuse it so My foods doesn't fill with copies.
+    let { data: food } = await db.from("foods").select("*").eq("fdc_id", hit.fdcId).eq("portion_label", label).limit(1).maybeSingle();
+    if (!food) {
+      const ins = await db.from("foods").insert({
+        name, portion_label: label, fdc_id: hit.fdcId, source: "search",
+        components: [{ name, portion: label, grams: g, nutrients: per, per_gram: perGram, source: "usda" }],
+        nutrients: per, tags: [],
+      }).select().single();
+      if (ins.error) { $("#log", body).disabled = false; return toast(ins.error.message); }
+      food = ins.data;
+    }
+    await logFood(food, servings, new Date($("#at", body).value || Date.now()), meal);
   });
 }
 

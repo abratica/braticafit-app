@@ -174,3 +174,84 @@ export async function analyzeMeal(input: { image?: string; mediaType?: string; t
     note: meal.note ?? "",
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// Search-as-you-type against USDA FoodData Central (generic + branded foods)
+// ---------------------------------------------------------------------------
+export type SearchHit = {
+  fdcId: number;
+  name: string;
+  brand: string | null;
+  kind: "generic" | "branded";
+  per100: Nutrients;
+  servings: { label: string; grams: number }[];
+};
+
+function per100From(food: any): Nutrients | null {
+  const out = zero();
+  let kcal208: number | undefined, kcalAtwater: number | undefined, kj: number | undefined;
+  for (const n of food.foodNutrients ?? []) {
+    const num = String(n.nutrientNumber ?? "");
+    const unit = String(n.unitName ?? "").toUpperCase();
+    const v = Number(n.value);
+    if (!Number.isFinite(v)) continue;
+    if (num === "208" && unit === "KCAL") kcal208 = v;
+    else if (num === "268" && unit === "KJ") kj = v;
+    else if ((num === "958" || num === "957") && unit === "KCAL") kcalAtwater ??= v;
+    else if (USDA_MAP[num]) out[USDA_MAP[num]] = v;
+  }
+  const kcal = kcal208 ?? kcalAtwater ?? (kj !== undefined ? kj / 4.184 : undefined);
+  if (kcal === undefined) return null;
+  out.kcal = kcal;
+  return out;
+}
+
+const titleCase = (s: string) =>
+  s.toLowerCase().replace(/(^|[\s,(/-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
+
+export async function searchFoods(q: string): Promise<SearchHit[]> {
+  const key = Deno.env.get("USDA_API_KEY") || "DEMO_KEY";
+  const run = async (dataType: string, pageSize: number) => {
+    const url = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
+    url.searchParams.set("api_key", key);
+    url.searchParams.set("query", q);
+    url.searchParams.set("pageSize", String(pageSize));
+    url.searchParams.set("dataType", dataType);
+    const res = await fetch(url);
+    if (res.status === 429) throw new Error("rate_limited");
+    if (!res.ok) throw new Error(`USDA search failed (${res.status})`);
+    return (await res.json()).foods ?? [];
+  };
+  const [generic, branded] = await Promise.all([
+    run("Survey (FNDDS),Foundation,SR Legacy", 12),
+    run("Branded", 15),
+  ]);
+  const seen = new Set<string>();
+  const hits: SearchHit[] = [];
+  for (const f of [...generic, ...branded]) {
+    const per100 = per100From(f);
+    if (!per100) continue;
+    const isBranded = f.dataType === "Branded";
+    const brand = isBranded ? titleCase(String(f.brandName || f.brandOwner || "")) || null : null;
+    const name = titleCase(String(f.description || "").trim());
+    const dedupe = `${name}|${brand ?? ""}`.toLowerCase();
+    if (!name || seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    const servings: { label: string; grams: number }[] = [];
+    if (isBranded && Number(f.servingSize) > 0 && /^(g|grm|ml|mlt)$/i.test(String(f.servingSizeUnit || ""))) {
+      const g = Number(f.servingSize);
+      const house = String(f.householdServingFullText || "").trim();
+      servings.push({ label: house ? `${house} (${round(g, 0)} g)` : `1 serving (${round(g, 0)} g)`, grams: g });
+    }
+    for (const m of f.foodMeasures ?? []) {
+      const g = Number(m.gramWeight);
+      const label = String(m.disseminationText || "").trim();
+      if (g > 0 && label && !/quantity not specified/i.test(label) && servings.length < 6) {
+        servings.push({ label: `${label} (${round(g, 0)} g)`, grams: g });
+      }
+    }
+    hits.push({ fdcId: f.fdcId, name, brand, kind: isBranded ? "branded" : "generic", per100, servings });
+  }
+  return hits.slice(0, 25);
+}

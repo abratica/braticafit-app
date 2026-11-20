@@ -435,3 +435,10 @@ a.btn.primary { color: var(--accent-ink); }
 @keyframes nudge { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 .add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 .add-grid .btn { justify-content: center; }
+
+/* Food search */
+.s-big { display: flex; align-items: center; gap: 8px; }
+.s-big svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; color: var(--muted); flex: none; }
+.s-big input { font-size: 17px; }
+.s-list { padding-top: 2px; padding-bottom: 2px; }
+.s-list .meta b { font-weight: 600; color: var(--ink); }
