@@ -642,7 +642,7 @@ function targetCard(g, t) {
       <div class="${left < 0 ? "neg" : "rem"}"><b>${Math.abs(left).toLocaleString()}</b><span>${left < 0 ? "Over" : "Remaining"}</span></div>
     </div>
     ${bar("Protein", t.protein, g.protein_g)}${bar("Carbs", t.carbs, g.carbs_g)}${bar("Fat", t.fat, g.fat_g)}
-    ${isCoach ? `<button class="auth-link t-edit" id="edit-targets">Edit targets</button>` : ""}
+    <button class="auth-link t-edit" id="edit-targets">Edit targets</button>
   </div>`;
 }
 
@@ -671,7 +671,7 @@ async function renderFood() {
     ${goal ? targetCard(goal, t) : `<div class="card">
       <div class="kcal"><b>${kcal.toLocaleString()}</b><span>calories so far</span></div>
       ${bar("Protein", t.protein, 4)}${bar("Carbs", t.carbs, 4)}${bar("Fat", t.fat, 9)}
-      ${isCoach ? `<button class="btn block" id="set-targets" style="margin-top:14px">Set daily targets</button>` : ""}
+      <button class="btn block" id="set-targets" style="margin-top:14px">Set daily targets</button>
     </div>`}
     <h3>Logged today</h3>
     ${(meals ?? []).length
@@ -703,7 +703,14 @@ const ACTIVITY = [
 ];
 const PACES = { lose: [0.25, 0.5, 0.75, 1, 1.5], maintain: [0], gain: [0.25, 0.5] };
 const PROTEIN_PER_LB = [0.7, 0.8, 0.9, 1, 1.1, 1.2];
-const FAT_PCT = [20, 25, 30, 35, 40];
+// Quick picks for the carbs ↔ fat slider (fat as % of calories; clamped to what's allowed).
+const SPLITS = [["More carbs", 22], ["Balanced", 30], ["More fat", 40], ["Low carb", 55]];
+// Fat can't go under 0.3 g per lb; carbs can't go under 50 g.
+function fatRange(kcal, protein_g, weight_lb) {
+  const min = Math.ceil(((weight_lb * 0.3 * 9) / kcal) * 100);
+  const max = Math.floor(((kcal - protein_g * 4 - 50 * 4) / kcal) * 100);
+  return [Math.min(min, max), Math.max(min, max)];
+}
 
 function calcTargets(i) {
   const kg = i.weight_lb * 0.453592, cm = i.height_in * 2.54;
@@ -752,9 +759,12 @@ async function openTargets() {
     <label class="field"><span>Activity</span><select class="input" id="t-act">${ACTIVITY.map(([k, , l, d]) => `<option value="${k}" ${k === f.activity ? "selected" : ""}>${l}: ${d}</option>`).join("")}</select></label>
     <div class="field"><span>Goal</span>${seg("t-goal", [["lose", "Lose"], ["maintain", "Maintain"], ["gain", "Gain"]], f.goal)}</div>
     <div class="field" id="t-pace-wrap"><span>Pace</span><div class="chips" id="t-pace"></div></div>
-    <div class="grid2">
-      <label class="field"><span>Protein per lb</span><select class="input" id="t-pro">${PROTEIN_PER_LB.map((v) => `<option value="${v}" ${v === f.protein_per_lb ? "selected" : ""}>${v} g</option>`).join("")}</select></label>
-      <label class="field"><span>Fat</span><select class="input" id="t-fat">${FAT_PCT.map((v) => `<option value="${v}" ${v === f.fat_pct ? "selected" : ""}>${v}% of calories</option>`).join("")}</select></label>
+    <label class="field"><span>Protein per lb of body weight</span><select class="input" id="t-pro">${PROTEIN_PER_LB.map((v) => `<option value="${v}" ${v === f.protein_per_lb ? "selected" : ""}>${v} g</option>`).join("")}</select></label>
+    <div class="field" id="t-split-wrap"><span>Carbs ↔ Fat</span>
+      <input type="range" class="split" id="t-split" min="15" max="60" step="1" value="${f.fat_pct}">
+      <div class="split-ends"><span id="t-carb-g"></span><span id="t-fat-g"></span></div>
+      <div class="chips" id="t-presets">${SPLITS.map(([l, v]) => `<button type="button" class="chip" data-split="${v}">${l}</button>`).join("")}</div>
+      <p class="small muted" style="margin:8px 0 0">Calories and protein stay the same. More carbs usually helps hard training; more fat keeps some people fuller.</p>
     </div>
     <div class="card t-result" id="t-out"></div>
     <button class="btn primary block" id="t-save">Save targets</button>`);
@@ -765,7 +775,7 @@ async function openTargets() {
     f.height_in = Number($("#t-ft", body).value) * 12 + Number($("#t-in", body).value || 0);
     f.activity = $("#t-act", body).value;
     f.protein_per_lb = Number($("#t-pro", body).value);
-    f.fat_pct = Number($("#t-fat", body).value);
+    f.fat_pct = Number($("#t-split", body).value);
   };
   const ready = () => f.age >= 13 && f.weight_lb > 50 && f.height_in >= 48;
   const drawPace = () => {
@@ -778,7 +788,20 @@ async function openTargets() {
     read();
     const out = $("#t-out", body);
     if (!ready()) { out.innerHTML = `<p class="small muted" style="margin:0">Fill in age, weight and height to see your numbers.</p>`; return; }
+    const base = calcTargets(f);
+    const [lo, hi] = fatRange(base.kcal, base.protein_g, f.weight_lb);
+    const sl = $("#t-split", body);
+    sl.min = lo; sl.max = hi;
+    if (f.fat_pct < lo || f.fat_pct > hi) { f.fat_pct = Math.min(hi, Math.max(lo, f.fat_pct)); sl.value = f.fat_pct; }
     const c = calcTargets(f);
+    $("#t-split-wrap", body).hidden = custom;
+    $("#t-carb-g", body).textContent = `${c.carbs_g}g carbs`;
+    $("#t-fat-g", body).textContent = `${c.fat_g}g fat`;
+    body.querySelectorAll("[data-split]").forEach((b) => {
+      const v = Math.min(hi, Math.max(lo, Number(b.dataset.split)));
+      b.setAttribute("aria-pressed", String(v === f.fat_pct));
+    });
+    sl.style.setProperty("--p", `${((f.fat_pct - lo) / Math.max(1, hi - lo)) * 100}%`);
     const n = custom && manual ? manual : c;
     const mk = (k, label, unit) => custom
       ? `<label class="t-num"><input class="input" data-m="${k}" type="number" inputmode="numeric" value="${n[k]}"><span>${label}</span></label>`
@@ -803,6 +826,11 @@ async function openTargets() {
       return draw();
     }
     if (b.dataset.pace) { f.pace_lb_wk = Number(b.dataset.pace); drawPace(); return draw(); }
+    if (b.dataset.split) {
+      const sl = $("#t-split", body);
+      sl.value = Math.min(Number(sl.max), Math.max(Number(sl.min), Number(b.dataset.split)));
+      return draw();
+    }
     if (b.id === "t-tune") {
       custom = !custom;
       if (custom && ready()) { const c = calcTargets(f); manual = { kcal: c.kcal, protein_g: c.protein_g, carbs_g: c.carbs_g, fat_g: c.fat_g }; }
