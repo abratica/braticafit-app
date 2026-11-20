@@ -73,12 +73,12 @@ export function createInbox(ctx) {
     const audio = m.audio_path ? `<audio controls preload="metadata" src="${esc(ib.urls[m.audio_path] || "")}"></audio>` : "";
     const tx = m.audio_path ? (m.transcript ? `<p class="ib-tx">${esc(m.transcript)}</p>`
       : m.transcript_status === "pending" ? `<p class="ib-tx muted">Transcribing…</p>` : m.transcript_status === "failed" ? `<p class="ib-tx muted">No transcript</p>` : "") : "";
-    const vid = m.video_id ? `<button class="ib-vid" data-ib-watch="${esc(m.video_id)}"><span class="ib-vth" style="background-image:url('${esc(m.video_thumb || thumbOf(m.video_id))}')">${SVG(IC.play, 14)}</span><b>${esc(m.video_title || "Video")}</b></button>` : "";
+    const vid = m.video_id ? `<button class="ib-vid" data-ib-watch="${esc(m.video_id)}"><span class="ib-vth" style="background-image:url('${esc(m.video_thumb || thumbOf(m.video_id))}')">${SVG(IC.play, 14)}</span><b>${esc(m.video_title || "Video")}${m.video_start ? ` <em>from ${mmss(m.video_start)}</em>` : ""}</b></button>` : "";
     const sugg = !coach && (m.suggestions || []).length ? `
       <div class="ib-sugg"><p class="ib-sugg-h">${SVG(IC.star, 14)} Suggested videos <span>only you see these</span></p>
         ${m.suggestions.map((s, i) => `<div class="ib-s">
           <button class="ib-s-th" data-ib-watch="${esc(s.video_id)}" style="background-image:url('${esc(s.thumb || thumbOf(s.video_id))}')" aria-label="Watch ${esc(s.name)}">${SVG(IC.play, 14)}</button>
-          <div class="ib-s-txt"><b>${esc(s.name)}</b><span>${esc(s.why || "")}</span><em>${s.source === "library" ? "Your Library" : "Precision Nutrition"}</em></div>
+          <div class="ib-s-txt"><b>${esc(s.name)}</b><span>${esc(s.why || "")}</span><em>${s.kind === "education" ? "Education · " : ""}${s.source === "library" ? "Your Library" : "Precision Nutrition"}${s.start_sec ? ` · from ${mmss(s.start_sec)}` : ""}</em></div>
           <button class="btn ghost ib-s-go" data-ib-attach="${m.id}:${i}">Attach</button></div>`).join("")}
       </div>` : "";
     return `<div class="ib-b ${coach ? "me" : "them"}">
@@ -99,7 +99,7 @@ export function createInbox(ctx) {
   function composerHtml() {
     const a = ib.attach;
     const chips = [
-      a ? `<div class="ib-chip"><span class="ib-vth" style="background-image:url('${esc(a.thumb || thumbOf(a.video_id))}')"></span><b>${esc(a.name)}</b>
+      a ? `<div class="ib-chip"><span class="ib-vth" style="background-image:url('${esc(a.thumb || thumbOf(a.video_id))}')"></span><b>${esc(a.name)}${a.start_sec ? ` <em>from ${mmss(a.start_sec)}</em>` : ""}</b>
           ${a.alt_id ? `<span class="c-mode ib-ver"><button data-ib-ver="men" aria-pressed="${a.ver !== "women"}">Men's</button><button data-ib-ver="women" aria-pressed="${a.ver === "women"}">Women's</button></span>` : ""}
           <button class="c-icon" data-ib-unattach aria-label="Remove video">${SVG(IC.x, 15)}</button></div>` : "",
       ib.clip ? `<div class="ib-chip"><audio controls src="${ib.clip.url}"></audio><span>${mmss(ib.clip.sec)}</span><button class="c-icon" data-ib-unclip aria-label="Delete voice note">${SVG(IC.x, 15)}</button></div>` : "",
@@ -220,7 +220,7 @@ export function createInbox(ctx) {
     const vid = a ? (a.ver === "women" && a.alt_id ? a.alt_id : a.video_id) : null;
     const { data: id, error } = await db.rpc("coach_send", {
       p_client: client, p_body: text || null, p_audio_path: path, p_audio_sec: clip?.sec ?? null,
-      p_video_id: vid, p_video_title: a ? a.name : null, p_video_thumb: a ? (st.thumbs[vid] || a.thumb || null) : null,
+      p_video_id: vid, p_video_title: a ? a.name : null, p_video_thumb: a ? (st.thumbs[vid] || a.thumb || null) : null, p_video_start: a?.start_sec || null,
     });
     if (error) { btn.disabled = false; return toast(error.message); }
     if (clip) URL.revokeObjectURL(clip.url);
@@ -242,7 +242,7 @@ export function createInbox(ctx) {
       const ql = q.trim().toLowerCase();
       const match = (s) => !ql || ql.split(/\s+/).every((w) => s.toLowerCase().includes(w));
       const lib = [], seen = new Set();
-      for (const d of st.demos) if (!seen.has(d.video_id) && match(`${d.exercise_name} ${d.title || ""}`)) { seen.add(d.video_id); lib.push({ video_id: d.video_id, name: d.exercise_name, sub: d.title || "", thumb: d.thumb }); }
+      for (const d of st.demos) if (!seen.has(d.video_id) && match(`${d.exercise_name} ${d.title || ""}`)) { seen.add(d.video_id); lib.push({ video_id: d.video_id, name: d.exercise_name, sub: `${d.kind === "education" ? "Education · " : ""}${d.title || ""}`, thumb: d.thumb, start_sec: d.start_sec || null }); }
       const pn = [];
       if (ql) for (const v of st.pn?.items ?? []) {
         if (v.version !== "men" && st.pn.byName.has(v.name.toLowerCase() + "|men")) continue;

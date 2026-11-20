@@ -118,7 +118,7 @@ export function createTrain(ctx) {
       const q = b.q.trim().toLowerCase();
       const names = new Map();
       for (const d of st.demos) {
-        if (d.kind === "workout") continue;
+        if (d.kind && d.kind !== "exercise") continue;
         const k = d.exercise_name.toLowerCase();
         if (!names.has(k)) names.set(k, { name: d.exercise_name, demo: d.video_id });
       }
@@ -147,7 +147,7 @@ export function createTrain(ctx) {
           </div>
         </div>`;
       const demos = st.demos.filter((d) => d.exercise_name.toLowerCase() === x.name.trim().toLowerCase());
-      const otherDemos = st.demos.filter((d) => !demos.includes(d) && d.kind !== "workout");
+      const otherDemos = st.demos.filter((d) => !demos.includes(d) && (!d.kind || d.kind === "exercise"));
       const nextIsEx = b.blocks[i + 1]?.type === "ex";
       return `
         <div class="bb ${x.link ? "linked" : ""}" draggable="true" data-i="${i}">
@@ -174,7 +174,7 @@ export function createTrain(ctx) {
     const videoPanel = () => {
       const q = b.vq.trim().toLowerCase();
       const pool = [];
-      for (const d of [...st.demos].sort((a, c) => (a.kind === "workout" ? 0 : 1) - (c.kind === "workout" ? 0 : 1))) pool.push({ id: d.video_id, title: d.kind === "workout" ? d.exercise_name : d.title || d.exercise_name, seconds: d.seconds, channel: d.channel });
+      for (const d of [...st.demos].filter((d) => d.kind !== "education").sort((a, c) => (a.kind === "workout" ? 0 : 1) - (c.kind === "workout" ? 0 : 1))) pool.push({ id: d.video_id, title: d.kind === "workout" ? d.exercise_name : d.title || d.exercise_name, seconds: d.seconds, channel: d.channel });
       // Library videos, minus the obvious clickbait (emoji, hype words, story titles).
       for (const ch of Object.values(st.data)) for (const v of ch.items) if (v.score >= 0) pool.push({ id: v.id, title: v.title, seconds: v.seconds, channel: ch.channel });
       const seen = new Set();

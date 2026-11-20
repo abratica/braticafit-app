@@ -19,7 +19,7 @@ export async function transcribe(audio: Blob, filename: string): Promise<string>
 }
 
 // ---------- candidate videos ----------
-type PNItem = { name: string; pattern?: string; group?: string; eq: string[]; men?: string; women?: string; easier?: string; harder?: string };
+type PNItem = { name: string; pattern?: string; group?: string; eq: string[]; men?: string; women?: string; easier?: string; harder?: string; cues?: string };
 let pnCache: { items: PNItem[]; media: Record<string, [number, string]>; at: number } | null = null;
 async function pnCatalog() {
   if (pnCache && Date.now() - pnCache.at < 6 * 3600e3) return pnCache;
@@ -42,7 +42,7 @@ const BODY: Record<string, string[]> = {
   mobility: ["Warmup & mobility"], stretch: ["Warmup & mobility"], tight: ["Warmup & mobility"], posture: ["Corrective"],
 };
 
-type Cand = { ref: string; line: string; score: number; out: Record<string, unknown> };
+type Cand = { ref: string; line: string; score: number; cues?: string; out: Record<string, unknown> };
 
 async function candidates(text: string, recentNames: string[]): Promise<Cand[]> {
   const msgW = new Set(words(text));
@@ -57,16 +57,21 @@ async function candidates(text: string, recentNames: string[]): Promise<Cand[]> 
     return s;
   };
   const out: Cand[] = [];
-  const lib = await sql`select video_id, exercise_name, kind, equipment, pattern, title, thumb from public.coach_demos order by created_at`;
+  const lib = await sql`select video_id, exercise_name, kind, equipment, pattern, title, thumb, helps_with, start_sec, cues
+                        from public.coach_demos order by created_at`;
   const seen = new Set<string>();
   lib.forEach((d, i) => {
     const key = d.exercise_name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
+    const helps = String(d.helps_with ?? "").trim();
+    const hw = words(helps);
+    const bonus = hw.filter((w) => msgW.has(w)).length * 4 + (d.kind === "education" ? words(d.title ?? "").filter((w) => msgW.has(w)).length * 2 : 0);
     out.push({
-      ref: `L${i}`, score: score(d.exercise_name, d.pattern) + 1,
-      line: `L${i} | ${d.exercise_name} | ${d.kind} | ${(d.equipment ?? []).join("/") || "-"} | ${d.pattern ?? "-"} | in coach's Library`,
-      out: { video_id: d.video_id, name: d.exercise_name, title: d.title, thumb: d.thumb, source: "library" },
+      ref: `L${i}`, score: score(d.exercise_name, d.pattern) + 1 + bonus,
+      cues: d.cues ?? "",
+      line: `L${i} | ${d.exercise_name} | ${d.kind} | ${(d.equipment ?? []).join("/") || "-"} | ${d.pattern ?? "-"} | in coach's Library${helps ? ` | coach says it helps with: ${helps}` : ""}${d.kind === "education" && d.title && d.title !== d.exercise_name ? ` | video title: ${d.title}` : ""}`,
+      out: { video_id: d.video_id, name: d.exercise_name, title: d.title, thumb: d.thumb, source: "library", kind: d.kind, start_sec: d.start_sec ?? null },
     });
   });
   const pn = await pnCatalog();
@@ -75,7 +80,7 @@ async function candidates(text: string, recentNames: string[]): Promise<Cand[]> 
     const id = e.men ?? e.women;
     if (!id) return;
     out.push({
-      ref: `P${i}`, score: score(e.name, e.pattern),
+      ref: `P${i}`, score: score(e.name, e.pattern), cues: e.cues ?? "",
       line: `P${i} | ${e.name} | exercise | ${e.eq.join("/")} | ${e.pattern ?? "-"}${e.easier ? ` | easier: ${e.easier}` : ""}${e.harder ? ` | harder: ${e.harder}` : ""}`,
       out: {
         video_id: "vm:" + id, alt_id: e.men && e.women ? "vm:" + e.women : null, name: e.name, title: e.name,
@@ -86,6 +91,10 @@ async function candidates(text: string, recentNames: string[]): Promise<Cand[]> 
   // Keep the prompt small: everything that overlaps the message or recent training, then a few of the Library.
   const ranked = out.filter((c) => c.score > 0).sort((a, b) => b.score - a.score).slice(0, 70);
   if (ranked.length < 25) for (const c of out.filter((c) => c.ref.startsWith("L") && !ranked.includes(c)).slice(0, 25 - ranked.length)) ranked.push(c);
+  // Every Education video the coach has noted goes in, so "why does this feel..." questions can find one.
+  for (const c of out) if (!ranked.includes(c) && c.out.kind === "education" && c.line.includes("helps with")) ranked.push(c);
+  // The best matches also carry their coaching cues, so a demo can be picked for a specific cue.
+  ranked.slice(0, 15).forEach((c) => { if (c.cues) c.line += ` | cues: ${c.cues.replace(/\s+/g, " ").slice(0, 220)}`; });
   return ranked;
 }
 
@@ -119,9 +128,11 @@ export async function groqJson(system: string, user: string): Promise<any> {
   return JSON.parse((await r.json()).choices?.[0]?.message?.content ?? "{}");
 }
 
-export const SYSTEM = `You help a personal trainer answer a client's message. Pick up to 3 exercise videos from the catalog that the trainer could send back to genuinely help with what the client said: a form-cue video for an exercise that felt off, an easier or joint-friendlier swap if something hurt, or a mobility drill for tightness.
+export const SYSTEM = `You help a personal trainer answer a client's message. Pick up to 3 videos from the catalog that the trainer could send back to genuinely help with what the client said: an education video that explains why something feels the way it does, a demo whose coaching cue fixes the problem, an easier or joint-friendlier swap if something hurt, or a mobility drill for tightness.
 Rules:
 - Only use refs that appear in the catalog. Prefer videos from the coach's Library (L refs) when they fit equally well.
+- When the client says where they feel an exercise, that something feels off, or that something hurts, include an education video if one clearly fits (the coach's "helps with" note is the strongest signal), and pair it with a cue or swap rather than just the same exercise again.
+- Only suggest the exact exercise they mentioned if its cues address their problem, and then say which cue in "why".
 - If the message is small talk, scheduling, food, or anything a video wouldn't help with, return no items.
 - Never diagnose. Keep each "why" under 15 words, written to the trainer (e.g. "Easier swap that keeps the knee behind the toes").
 Answer as JSON: {"items":[{"ref":"P12","why":"..."}]}`;

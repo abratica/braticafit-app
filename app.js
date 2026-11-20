@@ -243,10 +243,10 @@ function ytId(s) {
   return /^[\w-]{11}$/.test(String(s).trim()) ? String(s).trim() : null;
 }
 const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
-const embedSrc = (id) => (isVm(id)
-  ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0`
-  : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1`);
-const player = (id) => `<div class="player"><iframe src="${embedSrc(id)}"
+const embedSrc = (id, start = 0) => (isVm(id)
+  ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0${start ? `#t=${start}s` : ""}`
+  : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1${start ? `&start=${start}` : ""}`);
+const player = (id, start = 0) => `<div class="player"><iframe src="${embedSrc(id, start)}"
   title="Workout video" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
 
 const ICO = {
@@ -1386,8 +1386,8 @@ function msgBubble(m, urls) {
   const audio = m.audio_path ? `<audio controls preload="metadata" src="${esc(urls[m.audio_path] || "")}"></audio>` : "";
   const tx = m.audio_path ? (m.transcript ? `<p class="tx">${esc(m.transcript)}</p>`
     : m.transcript_status === "pending" ? `<p class="tx muted">Transcribing…</p>` : "") : "";
-  const vid = m.video_id ? `<button class="msg-video" data-demo="${esc(m.video_id)}" style="background-image:url('${esc(m.video_thumb || ytThumb(m.video_id))}')" aria-label="Play ${esc(m.video_title || "video")}">
-      <span class="play sm">${ICO.play}</span></button><b class="msg-vt">${esc(m.video_title || "Video")}</b>` : "";
+  const vid = m.video_id ? `<button class="msg-video" data-demo="${esc(m.video_id)}" data-start="${m.video_start || 0}" style="background-image:url('${esc(m.video_thumb || ytThumb(m.video_id))}')" aria-label="Play ${esc(m.video_title || "video")}">
+      <span class="play sm">${ICO.play}</span></button><b class="msg-vt">${esc(m.video_title || "Video")}${m.video_start ? ` <span class="muted small">· starts at ${mmss(m.video_start)}</span>` : ""}</b>` : "";
   const body = m.body ? `<div class="msg-text">${esc(m.body)}</div>` : "";
   return `<div class="bubble ${mine ? "me" : "them"}${m.audio_path ? " voice" : ""}" data-mid="${m.id}"><div>${body}${audio}${tx}${vid}</div>
     <span>${mine ? "" : "Coach · "}${when(m.created_at)}</span></div>`;
@@ -1440,7 +1440,7 @@ async function renderCoach() {
   };
   setBtn();
   $("#msg").addEventListener("input", setBtn);
-  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>${esc(b.nextElementSibling?.textContent || "Video")}</h2>${player(b.dataset.demo)}`)));
+  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>${esc(b.nextElementSibling?.textContent || "Video")}</h2>${player(b.dataset.demo, Number(b.dataset.start) || 0)}`)));
 
   const after = (id) => api("message_sent", { message_id: id }).catch(() => {}).then(() => { if (tab === "coach" && !recNow) renderCoach(); });
   $("#cmp").addEventListener("submit", async (e) => {
@@ -2203,7 +2203,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=10");
+    const m = await import("./coach.js?v=11");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
