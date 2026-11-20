@@ -1,7 +1,7 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
-import { createTrain } from "./coach-train.js?v=1";
+import { createTrain } from "./coach-train.js?v=2";
 
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
 const PAGE = 60;
@@ -55,7 +55,12 @@ function guessExercise(title) {
 
 const dur = (s) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`);
 const views = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n));
-const thumb = (id) => `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+const isVm = (id) => String(id || "").startsWith("vm:");
+const thumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/mqdefault.jpg`);
+const embed = (id) => (isVm(id)
+  ? `https://player.vimeo.com/video/${id.slice(3)}?autoplay=1&dnt=1&playsinline=1&title=0&byline=0&portrait=0`
+  : `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1&playsinline=1`);
+const watchUrl = (id) => (isVm(id) ? `https://vimeo.com/${id.slice(3)}` : `https://youtu.be/${id}`);
 
 const SVG = (p, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 const IC = {
@@ -410,12 +415,12 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     m.innerHTML = `<div class="c-modal-bg" data-close></div>
       <div class="c-modal-box ${tall ? "tall" : ""}" role="dialog" aria-modal="true" aria-label="${esc(v.title)}">
         <button class="c-icon c-close" data-close aria-label="Close">${SVG(IC.x, 20)}</button>
-        <div class="c-player ${tall ? "tall" : ""}"><iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1&playsinline=1" title="${esc(v.title)}"
+        <div class="c-player ${tall ? "tall" : ""}"><iframe src="${embed(id)}" title="${esc(v.title)}"
           allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
         <div class="c-modal-info">
           <h2>${esc(v.title)}</h2>
           <p class="c-vm">${esc(v.channel || "")}${v.seconds ? ` · ${dur(v.seconds)}` : ""}${v.views ? ` · ${views(v.views)} views` : ""}
-            · <a href="https://youtu.be/${id}" target="_blank" rel="noopener">YouTube ${SVG(IC.ext, 13)}</a></p>
+            · <a href="${watchUrl(id)}" target="_blank" rel="noopener">${isVm(id) ? "Vimeo" : "YouTube"} ${SVG(IC.ext, 13)}</a></p>
           ${saved
             ? `<div class="c-saved-line">${SVG(IC.star, 16)} Saved as <b>${esc(saved.exercise_name)}</b> <button class="c-link" data-del="${saved.id}">Remove</button></div>`
             : `<form class="c-save" id="c-save"><label><span>Exercise this shows</span><input id="c-ex" value="${esc(guessExercise(v.title))}" required></label>

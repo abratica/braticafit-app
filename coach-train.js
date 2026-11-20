@@ -84,7 +84,9 @@ const blockLabels = (blocks) => {
 
 export function createTrain(ctx) {
   const { db, esc, toast, SVG, IC, st } = ctx;
-  const ytThumb = (id) => `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+  const isVm = (id) => String(id || "").startsWith("vm:");
+  const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/mqdefault.jpg`);
+  const watchUrl = (id) => (isVm(id) ? `https://vimeo.com/${id.slice(3)}` : `https://youtu.be/${id}`);
 
   // =========================================================================
   // Workout builder (full screen): exercise library | workout | outline
@@ -179,8 +181,8 @@ export function createTrain(ctx) {
       return `
         <div class="bld-video">
           ${b.video_id ? `<div class="bld-picked"><span class="bld-big" style="background-image:url('${ytThumb(b.video_id)}')"></span>
-            <div><b>Selected video</b><span class="c-vm">youtu.be/${esc(b.video_id)}</span><button class="c-link" data-b-clear>Change</button></div></div>` : ""}
-          <label class="bld-f"><span>Paste a YouTube link</span><input data-b="link" placeholder="https://youtu.be/…" value=""></label>
+            <div><b>Selected video</b><span class="c-vm">${esc(watchUrl(b.video_id).replace(/^https:\/\//, ""))}</span><button class="c-link" data-b-clear>Change</button></div></div>` : ""}
+          <label class="bld-f"><span>Paste a YouTube or Vimeo link</span><input data-b="link" placeholder="https://youtu.be/…" value=""></label>
           <label class="bld-f"><span>Or search your Library${Object.keys(st.data).length ? "" : " (open a channel in the Library first to search it)"}</span>
             <input data-b="vq" value="${esc(b.vq)}" placeholder="yoga flow, mobility, dance cardio…"></label>
           <div class="bld-vgrid">${hits.map((v) => `<button class="bld-v ${v.id === b.video_id ? "on" : ""}" data-pickv="${v.id}" data-sec="${v.seconds || 0}">
@@ -306,8 +308,10 @@ export function createTrain(ctx) {
         return;
       }
       if (k === "link") {
+        const vm = e.target.value.match(/vimeo\.com\/(?:video\/)?(\d{6,})/);
         const m = e.target.value.match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/);
-        if (m) { b.video_id = m[1]; draw(); }
+        if (vm) { b.video_id = "vm:" + vm[1]; draw(); }
+        else if (m) { b.video_id = m[1]; draw(); }
         return;
       }
       if (k) b[k === "tod" ? "tod" : k] = e.target.value;
@@ -527,7 +531,7 @@ export function createTrain(ctx) {
           <p class="c-eyebrow">${dayFmt.format(parse(w.scheduled_on))}${w.completed_at ? ` · finished ${ctx.ago(w.completed_at)}` : " · in progress"}</p>
           <h2>${esc(w.title)}</h2>
           ${w.feel ? `<p>Felt <b>${FEEL[w.feel]}</b></p>` : ""}
-          ${w.kind === "video" ? `<p class="c-vm">Video workout${w.video_id ? ` · <a href="https://youtu.be/${w.video_id}" target="_blank" rel="noopener">watch</a>` : ""}</p>` : ""}
+          ${w.kind === "video" ? `<p class="c-vm">Video workout${w.video_id ? ` · <a href="${watchUrl(w.video_id)}" target="_blank" rel="noopener">watch</a>` : ""}</p>` : ""}
           ${(w.exercises ?? []).map((x) => `<div class="c-logged"><b>${x.superset ? `${x.superset} · ` : ""}${esc(x.name)}</b>
             ${x.interval ? `<span class="c-vm">${x.interval.rounds} rounds · ${(x.sets?.[0]?.done ? "done" : "not done")}</span>`
               : `<span>${(x.sets ?? []).map((s) => `<i class="${s.done ? "on" : ""}">${s.weight ? `${esc(s.weight)} × ` : ""}${esc(s.reps || "–")}</i>`).join("")}</span>`}</div>`).join("")}

@@ -228,14 +228,25 @@ const callFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "nu
 
 const FEEL = [["easy", "Easy"], ["solid", "Solid"], ["tough", "Tough"], ["rough", "Rough"]];
 
+// Video ids: plain 11-char ids are YouTube; "vm:<number>" is a Vimeo video (Precision Nutrition demos).
+const isVm = (id) => String(id || "").startsWith("vm:");
+function vmId(s) {
+  const m = String(s || "").match(/vimeo\.com\/(?:video\/)?(\d{6,})/);
+  return m ? "vm:" + m[1] : null;
+}
 function ytId(s) {
   if (!s) return null;
+  if (isVm(s)) return String(s);
+  const vm = vmId(s); if (vm) return vm;
   const m = String(s).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/);
   if (m) return m[1];
   return /^[\w-]{11}$/.test(String(s).trim()) ? String(s).trim() : null;
 }
-const ytThumb = (id) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
-const player = (id) => `<div class="player"><iframe src="https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1"
+const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
+const embedSrc = (id) => (isVm(id)
+  ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0`
+  : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1`);
+const player = (id) => `<div class="player"><iframe src="${embedSrc(id)}"
   title="Workout video" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
 
 const ICO = {
@@ -446,7 +457,7 @@ function openPlanner() {
     <div class="field"><span class="muted small">Type</span>
       <div class="seg seg-wide" id="pk"><button data-v="video" aria-pressed="true">Video</button><button data-v="written" aria-pressed="false">Written</button></div></div>
     <div id="pv">
-      <label class="field"><span>YouTube link</span><input class="input" id="pu" inputmode="url" placeholder="https://youtu.be/…"></label>
+      <label class="field"><span>YouTube or Vimeo link</span><input class="input" id="pu" inputmode="url" placeholder="https://youtu.be/…"></label>
     </div>
     <div id="pw" hidden>
       <label class="field"><span>Exercises, one per line</span><textarea class="input" id="px" rows="6"
@@ -475,7 +486,7 @@ function openPlanner() {
     let exercises = [];
     if (kind === "video") {
       row.video_id = ytId($("#pu", body).value);
-      if (!row.video_id) return toast("That doesn't look like a YouTube link");
+      if (!row.video_id) return toast("That doesn't look like a YouTube or Vimeo link");
     } else {
       exercises = parseExercises($("#px", body).value);
       if (!exercises.length) return toast("Add at least one exercise");
@@ -513,7 +524,7 @@ function parseExercises(text) {
     const parts = line.split(",").map((p) => p.trim()).filter(Boolean);
     let demo = null, restSec = null;
     const rest = parts.filter((p) => {
-      const id = ytId(p); if (id && /youtu/.test(p)) { demo = id; return false; }
+      const id = ytId(p); if (id && /youtu|vimeo/.test(p)) { demo = id; return false; }
       const r = p.match(/^(?:rest\s*)?(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds|m|min|mins|minutes)?(?:\s*rest)?$/i);
       if (r && /rest/i.test(p)) { restSec = Math.round(Number(r[1]) * (/^m/i.test(r[2] || "") ? 60 : 1)); return false; }
       return true;
@@ -2078,7 +2089,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=6");
+    const m = await import("./coach.js?v=7");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
