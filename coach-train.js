@@ -85,7 +85,7 @@ const blockLabels = (blocks) => {
 export function createTrain(ctx) {
   const { db, esc, toast, SVG, IC, st } = ctx;
   const isVm = (id) => String(id || "").startsWith("vm:");
-  const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/mqdefault.jpg`);
+  const ytThumb = (id) => st.thumbs?.[id] || (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/mqdefault.jpg`);
   const watchUrl = (id) => (isVm(id) ? `https://vimeo.com/${id.slice(3)}` : `https://youtu.be/${id}`);
 
   // =========================================================================
@@ -118,6 +118,7 @@ export function createTrain(ctx) {
       const q = b.q.trim().toLowerCase();
       const names = new Map();
       for (const d of st.demos) {
+        if (d.kind === "workout") continue;
         const k = d.exercise_name.toLowerCase();
         if (!names.has(k)) names.set(k, { name: d.exercise_name, demo: d.video_id });
       }
@@ -126,7 +127,7 @@ export function createTrain(ctx) {
         ${q ? `<button class="bld-li new" draggable="true" data-add="${esc(b.q.trim())}" data-demo="">${SVG(IC.plus ?? '<path d="M12 5v14M5 12h14"/>', 16)}<span>Add “${esc(b.q.trim())}”</span></button>` : ""}
         ${hits.map((x) => `<button class="bld-li" draggable="true" data-add="${esc(x.name)}" data-demo="${esc(x.demo)}">
           <span class="bld-th" style="background-image:url('${ytThumb(x.demo)}')"></span><span>${esc(x.name)}</span></button>`).join("")}
-        ${!hits.length && !q ? `<p class="c-vm">Save demos in the Library and they show up here with their video. Or type any exercise name above.</p>` : ""}`;
+        ${!hits.length && !q ? `<p class="c-vm">Add exercises to your Library and they show up here with their video. Or type any exercise name above.</p>` : ""}`;
     };
 
     const blockHtml = (x, i, labels) => {
@@ -146,7 +147,7 @@ export function createTrain(ctx) {
           </div>
         </div>`;
       const demos = st.demos.filter((d) => d.exercise_name.toLowerCase() === x.name.trim().toLowerCase());
-      const otherDemos = st.demos.filter((d) => !demos.includes(d));
+      const otherDemos = st.demos.filter((d) => !demos.includes(d) && d.kind !== "workout");
       const nextIsEx = b.blocks[i + 1]?.type === "ex";
       return `
         <div class="bb ${x.link ? "linked" : ""}" draggable="true" data-i="${i}">
@@ -173,7 +174,7 @@ export function createTrain(ctx) {
     const videoPanel = () => {
       const q = b.vq.trim().toLowerCase();
       const pool = [];
-      for (const d of st.demos) pool.push({ id: d.video_id, title: d.title || d.exercise_name, seconds: d.seconds, channel: d.channel });
+      for (const d of [...st.demos].sort((a, c) => (a.kind === "workout" ? 0 : 1) - (c.kind === "workout" ? 0 : 1))) pool.push({ id: d.video_id, title: d.kind === "workout" ? d.exercise_name : d.title || d.exercise_name, seconds: d.seconds, channel: d.channel });
       // Library videos, minus the obvious clickbait (emoji, hype words, story titles).
       for (const ch of Object.values(st.data)) for (const v of ch.items) if (v.score >= 0) pool.push({ id: v.id, title: v.title, seconds: v.seconds, channel: ch.channel });
       const seen = new Set();

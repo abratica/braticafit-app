@@ -1,7 +1,7 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
-import { createTrain } from "./coach-train.js?v=3";
+import { createTrain } from "./coach-train.js?v=4";
 
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
 const PAGE = 60;
@@ -27,6 +27,19 @@ const EXERCISES = [
   "copenhagen plank", "nordic curl", "calf raise", "hip flexor stretch", "hamstring stretch", "couch stretch", "90/90",
   "thoracic rotation", "cat cow", "world's greatest stretch", "ankle mobility", "hip mobility", "shoulder mobility", "stretch",
 ];
+const EQUIP = [["bodyweight", "Bodyweight"], ["dumbbell", "Dumbbells"], ["barbell", "Barbell"], ["kettlebell", "Kettlebell"], ["band", "Bands"],
+  ["cable", "Cable"], ["machine", "Machines"], ["suspension", "Rings / TRX"], ["other", "Other gear"]];
+const EQ_LABEL = Object.fromEntries(EQUIP);
+const EQ_RX = [["barbell", /\bbarbell|\bbb\b|trap[- ]bar|hex[- ]bar|landmine|zercher/], ["dumbbell", /dumbbell|\bdb\b|goblet/], ["kettlebell", /kettlebell|\bkb\b/],
+  ["band", /\bbands?\b|\bbanded|resistance band|mini[- ]?band/], ["cable", /\bcable/],
+  ["machine", /machine|leg press|smith|pull-?down|pec deck|leg curl|leg extension|hack squat|chest press|seated row machine|assisted pull/],
+  ["suspension", /\btrx|suspension|\brings?\b/], ["other", /\bplate\b|med(icine)? ball|sandbag|ab wheel|stability ball|swiss ball|foam roll|\bsled\b|slideboard|slider|\bdowel/]];
+function guessEq(text) {
+  const t = String(text || "").toLowerCase();
+  const out = EQ_RX.filter(([, rx]) => rx.test(t)).map(([k]) => k);
+  if (out.includes("machine") && /lat pull-?down|cable/.test(t)) out.splice(out.indexOf("machine"), 1, ...(out.includes("cable") ? [] : ["cable"]));
+  return out.length ? [...new Set(out)] : ["bodyweight"];
+}
 const HYPE = /\b(and then|wrong|fail|failed|shock|shocked|insane|legendary|impressive|amazing|incredible|secret|caught|crazy|gone|terribly|horribly|everyone|satisfying|perfect|exact pr|vs\.?|side effects|unless)\b/i;
 const STORY = /\b(she|he|her|his|him|bro|man|men|woman|women|lady|girl|guy|wife|husband|year old|kid|grandma|grandpa)\b/i;
 const INSTRUCT = /\b(how to|how-to|proper form|form tips|form guide|technique|tutorial|demo|demonstration|step by step|cues?|setup|explained)\b/i;
@@ -75,6 +88,7 @@ const IC = {
   x: '<path d="M7 7l10 10M17 7 7 17"/>',
   play: '<path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
 };
@@ -82,7 +96,7 @@ const IC = {
 export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=6"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=7"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -91,9 +105,10 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
   document.body.appendChild(root);
 
   const st = {
-    view: ["dashboard", "library", "clients", "programs", "inbox", "calls"].includes(view) ? view : "dashboard", channels: [], data: {}, demos: [], members: [], requests: [], confirmRm: null, mail: null,
+    view: ["dashboard", "library", "clients", "programs", "inbox", "calls"].includes(view) ? view : "dashboard", channels: [], data: {}, demos: [], pn: null, thumbs: {}, members: [], requests: [], confirmRm: null, mail: null,
     client: null, prog: null, progList: [],
-    lib: { channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE, tab: "videos" },
+    lib: { tab: "library", src: "pn", channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE,
+      kind: "all", eq: "all", pattern: "all", version: "all", showIn: true, lq: "", lkind: "all", leq: "all" },
   };
 
   async function loadIndex() {
@@ -114,6 +129,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
   async function loadDemos() {
     const { data } = await db.from("coach_demos").select("*").order("exercise_name").order("created_at");
     st.demos = data ?? [];
+    for (const d of st.demos) if (d.thumb) st.thumbs[d.video_id] = d.thumb;
   }
 
   // ---------- shell ----------
@@ -294,8 +310,8 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     const kcalLine = (p) => p.avg_kcal_7 == null ? "–" : `${Number(p.avg_kcal_7).toLocaleString()}${p.targets?.kcal ? ` <span class="c-vm">/ ${p.targets.kcal.toLocaleString()}</span>` : ""}`;
 
     let fresh = [];
-    if (st.lib.channel) {
-      const ch = await loadChannel(st.lib.channel);
+    if (st.channels[0]) {
+      const ch = await loadChannel(st.channels[0].slug);
       fresh = ch.items.filter((v) => v.seconds <= 60 && v.score >= 2).sort((a, b) => b.score - a.score || b.views - a.views).slice(0, 6);
     }
 
@@ -308,7 +324,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
       <div class="c-stats">
         <div class="c-stat"><span>Clients</span><b class="accent">${clientsOnly.length}</b><em>${st.members.length - clientsOnly.length ? `${st.members.length - clientsOnly.length} invited, not joined` : "Joined and active"}</em></div>
         <div class="c-stat"><span>Client workouts</span><b>${wDone}/${wAll}</b><em>Done this week</em></div>
-        <div class="c-stat"><span>Demos saved</span><b>${st.demos.length}</b><em>${totalVideos.toLocaleString()} library videos</em></div>
+        <div class="c-stat"><span>In your Library</span><b>${st.demos.length}</b><em>${(totalVideos + 793).toLocaleString()} videos to browse</em></div>
         <div class="c-stat"><span>Needs attention</span><b>${new Set(flags.map(([p]) => p.user_id)).size}</b><em>${flags.length ? "See below" : "All good"}</em></div>
       </div>
       <div class="c-row">
@@ -327,104 +343,211 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
             <span class="c-done">${p.avg_protein_7 != null ? `${p.avg_protein_7}g` : "–"}</span></div>`).join("")}
         </div></div>
       </section>
-      ${fresh.length ? `<section class="c-card"><div class="c-card-head"><h3>Best demo matches</h3><button class="c-link" data-nav="library">See all</button></div>
+      ${fresh.length ? `<section class="c-card"><div class="c-card-head"><h3>Best demo matches</h3><button class="c-link" data-nav="library" data-libtab="browse">Browse</button></div>
         <div class="c-grid six">${fresh.map(card).join("")}</div></section>` : ""}`;
   }
 
-  // ---------- library ----------
-  function filtered(ch) {
-    const L = st.lib;
-    const [, , lo, hi] = BUCKETS.find((b) => b[0] === L.bucket);
-    const q = L.q.trim().toLowerCase();
-    let items = ch.items.filter((v) => v.seconds >= lo && v.seconds <= hi);
-    if (L.clean) items = items.filter((v) => v.score >= 1);
-    if (q) items = items.filter((v) => q.split(/\s+/).every((w) => v.title.toLowerCase().includes(w)));
-    const by = { demo: (a, b) => b.score - a.score || b.views - a.views, views: (a, b) => b.views - a.views, new: (a, b) => (a.published < b.published ? 1 : -1) }[L.sort];
-    return items.sort(by);
+  // ---------- library (saved) + browse (everything) ----------
+  const inLib = (id) => st.demos.find((d) => d.video_id === id);
+  const thumbOf = (id) => st.thumbs[id] || thumb(id);
+  const matchQ = (q, ...txt) => !q || q.split(/\s+/).every((w) => txt.some((t) => (t || "").toLowerCase().includes(w)));
+
+  async function loadPN() {
+    if (st.pn) return st.pn;
+    const [cat, media] = await Promise.all([
+      fetch("data/pn.json").then((r) => r.json()),
+      fetch("data/pn-media.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+    ]);
+    const items = [];
+    for (const e of cat.items) {
+      for (const ver of ["men", "women"]) {
+        if (!e[ver]) continue;
+        const id = "vm:" + e[ver];
+        const [seconds, th] = media[e[ver]] || [];
+        if (th) st.thumbs[id] = th;
+        items.push({ id, name: e.name, title: e.name, version: ver, seconds: seconds || 0, channel: "Precision Nutrition", kind: "exercise",
+          eq: e.eq, pattern: e.pattern, cues: e.cues || "", easier: e.easier, harder: e.harder, travel: e.travel, views: 0, published: "", score: 9 });
+      }
+    }
+    st.pn = { channel: "Precision Nutrition", items, byName: new Map(items.map((x) => [x.name.toLowerCase() + "|" + x.version, x])) };
+    return st.pn;
   }
+  const ytKind = (v) => (v.seconds && v.seconds > 180 ? "workout" : "exercise");
+  const asItem = (v, ch) => ({ ...v, channel: ch.channel, kind: ytKind(v), eq: guessEq(v.title), name: guessExercise(v.title) });
+
+  function eqChips(pool, cur, attr) {
+    const counts = {};
+    for (const x of pool) for (const k of x.eq) counts[k] = (counts[k] || 0) + 1;
+    return `<button class="c-chip ${cur === "all" ? "on" : ""}" data-${attr}="all">Any equipment</button>`
+      + EQUIP.filter(([k]) => counts[k]).map(([k, label]) => `<button class="c-chip ${cur === k ? "on" : ""}" data-${attr}="${k}">${label} <i>${counts[k]}</i></button>`).join("");
+  }
+  const kindChips = (cur, attr) => [["all", "All"], ["exercise", "Exercises"], ["workout", "Workouts"]]
+    .map(([k, l]) => `<button class="c-chip ${cur === k ? "on" : ""}" data-${attr}="${k}">${l}</button>`).join("");
+  const verLabel = (v) => (v === "men" ? "Men's" : v === "women" ? "Women's" : "");
 
   function card(v) {
-    const saved = st.demos.find((d) => d.video_id === v.id);
-    return `<button class="c-vid" data-vid="${v.id}">
-      <span class="c-thumb" style="background-image:url('${thumb(v.id)}')"><span class="c-play">${SVG(IC.play, 16)}</span><span class="c-dur">${dur(v.seconds)}</span>
-      ${saved ? `<span class="c-saved" title="Saved as ${esc(saved.exercise_name)}">${SVG(IC.star, 14)}</span>` : ""}</span>
-      <span class="c-vt">${esc(v.title)}</span>
-      <span class="c-vm">${views(v.views)} views · ${v.published.slice(0, 4)}</span></button>`;
+    const saved = inLib(v.id);
+    return `<div class="c-demo">
+      <button class="c-vid" data-vid="${v.id}">
+        <span class="c-thumb" style="background-image:url('${thumbOf(v.id)}')"><span class="c-play">${SVG(IC.play, 16)}</span>${v.seconds ? `<span class="c-dur">${dur(v.seconds)}</span>` : ""}
+          <span class="c-kind ${v.kind}">${v.kind === "workout" ? "Workout" : "Exercise"}</span></span>
+        <span class="c-vt">${esc(v.title)}</span>
+        <span class="c-vm">${v.version ? `${verLabel(v.version)} · ${esc(v.pattern || "")}` : `${v.views ? `${views(v.views)} views · ` : ""}${(v.published || "").slice(0, 4)}`}</span></button>
+      <button class="c-icon c-add ${saved ? "on" : ""}" data-quick="${v.id}" aria-pressed="${!!saved}" aria-label="${saved ? "In your Library. Tap to remove" : "Add to Library"}" title="${saved ? "In your Library" : "Add to Library"}">${SVG(saved ? IC.check : IC.plus, 17)}</button>
+    </div>`;
   }
 
   async function library() {
     const L = st.lib;
-    if (!st.channels.length) {
-      return `<header class="c-head"><div><p class="c-eyebrow">Library</p><h1>Exercise videos</h1></div></header>
-        <section class="c-card c-empty"><p>No channels scanned yet.</p></section>`;
-    }
-    const chips = st.channels.map((c) => `<button class="c-chip ${L.tab === "videos" && L.channel === c.slug ? "on" : ""}" data-ch="${c.slug}">${esc(c.channel)} <i>${(c.total || 0).toLocaleString()}</i></button>`).join("")
-      + `<button class="c-chip ${L.tab === "demos" ? "on" : ""}" data-demos>${SVG(IC.star, 14)} My demos <i>${st.demos.length}</i></button>`;
-    const head = `<header class="c-head"><div><p class="c-eyebrow">Library</p><h1>Exercise videos</h1></div></header>
-      <div class="c-chips">${chips}</div>`;
-    if (L.tab === "demos") return head + demosView();
+    const tabs = `<div class="c-tabs big"><button ${L.tab === "library" ? 'aria-current="page"' : ""} data-libtab="library">Library <i>${st.demos.length}</i></button>
+      <button ${L.tab === "browse" ? 'aria-current="page"' : ""} data-libtab="browse">Browse</button></div>`;
+    const head = `<header class="c-head"><div><p class="c-eyebrow">Videos</p><h1>${L.tab === "library" ? "Your Library" : "Browse videos"}</h1></div></header>${tabs}`;
+    return head + (L.tab === "library" ? libraryTab() : await browseTab());
+  }
 
-    const ch = await loadChannel(L.channel);
-    const items = filtered(ch);
-    const hidden = L.clean ? ch.items.length - ch.items.filter((v) => v.score >= 1).length : 0;
-    return head + `
+  function libraryTab() {
+    const L = st.lib;
+    if (!st.demos.length) return `<section class="c-card c-empty"><p>Your Library is empty. Go to <button class="c-link" data-libtab="browse">Browse</button> and tap <b>+</b> on any video to add it.</p></section>`;
+    const rows = st.demos.map((d) => ({ ...d, eqs: d.equipment?.length ? d.equipment : guessEq(`${d.exercise_name} ${d.title || ""}`) }));
+    const q = L.lq.trim().toLowerCase();
+    const base = rows.filter((d) => (L.lkind === "all" || d.kind === L.lkind) && matchQ(q, d.exercise_name, d.title));
+    const list = base.filter((d) => L.leq === "all" || d.eqs.includes(L.leq));
+    const groups = {};
+    for (const d of list) (groups[d.exercise_name] ??= []).push(d);
+    const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    return `
+      <div class="c-tools"><label class="c-search">${SVG(IC.search, 17)}<span class="sr">Search your Library</span><input id="c-lq" value="${esc(L.lq)}" placeholder="Search your Library" autocomplete="off"></label></div>
+      <div class="c-chips small">${kindChips(L.lkind, "lkind")}</div>
+      <div class="c-chips small">${eqChips(base.map((d) => ({ eq: d.eqs })), L.leq, "leq")}</div>
+      <p class="c-count">${names.length} ${names.length === 1 ? "entry" : "entries"} · ${list.length} video${list.length === 1 ? "" : "s"}</p>
+      ${names.length ? names.map((name) => `
+        <section class="c-card"><h3>${esc(name)} <span class="c-kind inline ${groups[name][0].kind}">${groups[name][0].kind === "workout" ? "Workout" : "Exercise"}</span></h3>
+          <div class="c-grid">${groups[name].map((d) => `<div class="c-demo">
+            <button class="c-vid" data-vid="${d.video_id}">
+              <span class="c-thumb" style="background-image:url('${d.thumb || thumbOf(d.video_id)}')"><span class="c-play">${SVG(IC.play, 16)}</span>${d.seconds ? `<span class="c-dur">${dur(d.seconds)}</span>` : ""}</span>
+              <span class="c-vt">${esc(d.title || "")}</span><span class="c-vm">${esc(d.channel || "")}${d.eqs.length ? ` · ${d.eqs.map((k) => EQ_LABEL[k] || k).join(", ")}` : ""}</span></button>
+            <button class="c-icon" data-del="${d.id}" aria-label="Remove ${esc(name)} from your Library">${SVG(IC.trash, 17)}</button></div>`).join("")}</div>
+        </section>`).join("") : `<section class="c-card c-empty"><p>Nothing in your Library matches those filters.</p></section>`}`;
+  }
+
+  async function browseTab() {
+    const L = st.lib;
+    if (L.src === "pn" || !st.channels.length) { L.src = "pn"; await loadPN(); }
+    const srcChips = `<button class="c-chip ${L.src === "pn" ? "on" : ""}" data-src="pn">Precision Nutrition <i>${st.pn ? st.pn.items.length : "800"}</i></button>`
+      + st.channels.map((c) => `<button class="c-chip ${L.src === c.slug ? "on" : ""}" data-src="${c.slug}">${esc(c.channel)} <i>${(c.total || 0).toLocaleString()}</i></button>`).join("");
+    const isPN = L.src === "pn";
+    let pool;
+    if (isPN) pool = (await loadPN()).items;
+    else { const ch = await loadChannel(L.src); pool = ch.items.map((v) => asItem(v, ch)); }
+    const q = L.q.trim().toLowerCase();
+    let base = pool.filter((v) => (L.kind === "all" || v.kind === L.kind) && matchQ(q, v.title, v.name) && (L.showIn || !inLib(v.id)));
+    if (isPN) base = base.filter((v) => (L.pattern === "all" || v.pattern === L.pattern) && (L.version === "all" || v.version === L.version));
+    else {
+      const [, , lo, hi] = BUCKETS.find((b) => b[0] === L.bucket);
+      base = base.filter((v) => v.seconds >= lo && v.seconds <= hi && (!L.clean || v.score >= (v.kind === "workout" ? 0 : 1)));
+    }
+    let items = base.filter((v) => L.eq === "all" || v.eq.includes(L.eq));
+    if (!isPN) {
+      const by = { demo: (a, b) => b.score - a.score || b.views - a.views, views: (a, b) => b.views - a.views, new: (a, b) => (a.published < b.published ? 1 : -1) }[L.sort];
+      items = items.sort(by);
+    }
+    const nIn = pool.filter((v) => inLib(v.id)).length;
+    const patterns = isPN ? [...new Set(pool.map((v) => v.pattern))] : [];
+    return `
+      <div class="c-chips">${srcChips}</div>
       <div class="c-tools">
-        <label class="c-search">${SVG(IC.search, 17)}<span class="sr">Search titles</span><input id="c-q" value="${esc(L.q)}" placeholder="Search titles, e.g. lat pulldown" autocomplete="off"></label>
-        <label class="c-select"><span class="sr">Sort</span><select id="c-sort">
-          <option value="demo" ${L.sort === "demo" ? "selected" : ""}>Best demo match</option>
-          <option value="views" ${L.sort === "views" ? "selected" : ""}>Most viewed</option>
-          <option value="new" ${L.sort === "new" ? "selected" : ""}>Newest</option></select></label>
-        <button class="c-toggle" id="c-clean" aria-pressed="${L.clean}"><span class="c-knob"></span>Hide clickbait</button>
+        <label class="c-search">${SVG(IC.search, 17)}<span class="sr">Search</span><input id="c-q" value="${esc(L.q)}" placeholder="${isPN ? "Search exercises, e.g. split squat" : "Search titles, e.g. lat pulldown"}" autocomplete="off"></label>
+        ${isPN ? `<label class="c-select"><span class="sr">Movement</span><select id="c-pattern"><option value="all">All movements</option>
+            ${patterns.map((p) => `<option ${L.pattern === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>`
+          : `<label class="c-select"><span class="sr">Sort</span><select id="c-sort">
+            <option value="demo" ${L.sort === "demo" ? "selected" : ""}>Best demo match</option>
+            <option value="views" ${L.sort === "views" ? "selected" : ""}>Most viewed</option>
+            <option value="new" ${L.sort === "new" ? "selected" : ""}>Newest</option></select></label>
+          <button class="c-toggle" id="c-clean" aria-pressed="${L.clean}"><span class="c-knob"></span>Hide clickbait</button>`}
+        <label class="c-check"><input type="checkbox" id="c-showin" ${L.showIn ? "checked" : ""}> Show ones in my Library${nIn ? ` <i>${nIn}</i>` : ""}</label>
       </div>
-      <div class="c-chips small">${BUCKETS.map(([k, label]) => `<button class="c-chip ${L.bucket === k ? "on" : ""}" data-bucket="${k}">${label}</button>`).join("")}</div>
-      <p class="c-count">${items.length.toLocaleString()} video${items.length === 1 ? "" : "s"}${hidden ? ` · ${hidden.toLocaleString()} clickbait hidden` : ""}</p>
-      ${items.length ? `<div class="c-grid">${items.slice(0, L.shown).map(card).join("")}</div>` : `<section class="c-card c-empty"><p>Nothing matches. Try a different length or turn off Hide clickbait.</p></section>`}
+      <div class="c-chips small">${kindChips(L.kind, "kind")}${isPN
+        ? `<span class="c-chip-sep"></span>${[["all", "Both versions"], ["men", "Men's"], ["women", "Women's"]].map(([k, l]) => `<button class="c-chip ${L.version === k ? "on" : ""}" data-version="${k}">${l}</button>`).join("")}`
+        : `<span class="c-chip-sep"></span>${BUCKETS.map(([k, label]) => `<button class="c-chip ${L.bucket === k ? "on" : ""}" data-bucket="${k}">${label}</button>`).join("")}`}</div>
+      <div class="c-chips small">${eqChips(base, L.eq, "eq")}</div>
+      <p class="c-count">${items.length.toLocaleString()} video${items.length === 1 ? "" : "s"}${!L.showIn && nIn ? ` · ${nIn} already in your Library hidden` : ""}</p>
+      ${items.length ? `<div class="c-grid">${items.slice(0, L.shown).map(card).join("")}</div>` : `<section class="c-card c-empty"><p>Nothing matches. Try loosening a filter.</p></section>`}
       ${items.length > L.shown ? `<button class="btn ghost block c-more" id="c-more">Show more (${(items.length - L.shown).toLocaleString()} left)</button>` : ""}`;
   }
 
-  function demosView() {
-    if (!st.demos.length) return `<section class="c-card c-empty"><p>No demos saved yet. Open any video and tap <b>Save as demo</b> to name the exercise it shows.</p></section>`;
-    const groups = {};
-    for (const d of st.demos) (groups[d.exercise_name] ??= []).push(d);
-    return Object.entries(groups).map(([name, list]) => `
-      <section class="c-card"><h3>${esc(name)}</h3>
-        <div class="c-grid">${list.map((d) => `<div class="c-demo">
-          <button class="c-vid" data-vid="${d.video_id}" data-title="${esc(d.title || "")}" data-sec="${d.seconds || 0}">
-            <span class="c-thumb" style="background-image:url('${thumb(d.video_id)}')"><span class="c-play">${SVG(IC.play, 16)}</span>${d.seconds ? `<span class="c-dur">${dur(d.seconds)}</span>` : ""}</span>
-            <span class="c-vt">${esc(d.title || "")}</span><span class="c-vm">${esc(d.channel || "")}</span></button>
-          <button class="c-icon" data-del="${d.id}" aria-label="Remove ${esc(name)} demo">${SVG(IC.trash, 17)}</button></div>`).join("")}</div>
-      </section>`).join("");
+  function browseItem(id) {
+    const p = st.pn?.items.find((x) => x.id === id);
+    if (p) return p;
+    for (const ch of Object.values(st.data)) {
+      const v = ch.items.find((x) => x.id === id);
+      if (v) return asItem(v, ch);
+    }
+    return null;
+  }
+
+  async function addToLib(v, name = v.name, kind = v.kind) {
+    const { error } = await db.from("coach_demos").insert({
+      video_id: v.id, exercise_name: name, title: v.version ? `${verLabel(v.version)} ${v.title}` : v.title, seconds: v.seconds || null,
+      channel: v.channel || null, kind, equipment: v.eq || [], pattern: v.pattern || null, cues: v.cues || null, thumb: st.thumbs[v.id] || null,
+    });
+    if (error) { toast(error.code === "23505" ? "Already in your Library" : error.message); return false; }
+    await loadDemos();
+    return true;
+  }
+  async function removeFromLib(id) {
+    const { error } = await db.from("coach_demos").delete().eq("id", id);
+    if (error) { toast(error.message); return false; }
+    await loadDemos();
+    return true;
+  }
+  function refreshBadges() {
+    const b = root.querySelector('[data-nav="library"] .c-badge');
+    if (b) b.textContent = st.demos.length;
+    const t = root.querySelector('[data-libtab="library"] i');
+    if (t) t.textContent = st.demos.length;
   }
 
   // ---------- player modal ----------
   function findVideo(id) {
-    for (const ch of Object.values(st.data)) {
-      const v = ch.items.find((x) => x.id === id);
-      if (v) return { ...v, channel: ch.channel };
-    }
-    const d = st.demos.find((x) => x.video_id === id);
-    return d ? { id, title: d.title || "", seconds: d.seconds || 0, channel: d.channel, views: 0, published: "" } : null;
+    const v = browseItem(id);
+    if (v) return v;
+    const d = inLib(id);
+    return d ? { id, title: d.title || "", name: d.exercise_name, seconds: d.seconds || 0, channel: d.channel, kind: d.kind, eq: d.equipment || [], pattern: d.pattern, cues: d.cues || "", views: 0, published: "" } : null;
+  }
+  const cueList = (s) => {
+    const parts = String(s || "").split(/\s*\d+\.\s+/).map((x) => x.trim()).filter(Boolean);
+    return parts.length ? `<ol class="c-cues">${parts.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : "";
+  };
+  function variantBtn(label, name, ver) {
+    if (!name || !st.pn) return "";
+    const hit = st.pn.byName.get(name.toLowerCase() + "|" + ver) || st.pn.byName.get(name.toLowerCase() + "|" + (ver === "men" ? "women" : "men"));
+    return hit ? `<button class="c-chip" data-vid="${hit.id}">${label}: ${esc(name)}</button>` : `<span class="c-vm">${label}: ${esc(name)}</span>`;
   }
 
   function openPlayer(id) {
     const v = findVideo(id);
     if (!v) return;
-    const saved = st.demos.find((d) => d.video_id === id);
-    const tall = v.seconds && v.seconds <= 60;
+    const saved = inLib(id);
+    const tall = v.seconds && v.seconds <= 60 && !isVm(id);
     const m = root.querySelector("#c-modal");
+    const defName = saved?.exercise_name || v.name || guessExercise(v.title);
     m.innerHTML = `<div class="c-modal-bg" data-close></div>
-      <div class="c-modal-box ${tall ? "tall" : ""}" role="dialog" aria-modal="true" aria-label="${esc(v.title)}">
+      <div class="c-modal-box ${tall ? "tall" : v.cues ? "side" : ""}" role="dialog" aria-modal="true" aria-label="${esc(v.title)}">
         <button class="c-icon c-close" data-close aria-label="Close">${SVG(IC.x, 20)}</button>
-        <div class="c-player ${tall ? "tall" : ""}"><iframe src="${embed(id)}" title="${esc(v.title)}"
+        <div class="c-player ${tall ? "tall" : v.cues ? "side" : ""}"><iframe src="${embed(id)}" title="${esc(v.title)}"
           allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
         <div class="c-modal-info">
-          <h2>${esc(v.title)}</h2>
-          <p class="c-vm">${esc(v.channel || "")}${v.seconds ? ` · ${dur(v.seconds)}` : ""}${v.views ? ` · ${views(v.views)} views` : ""}
+          <h2>${esc(v.version ? v.name : v.title)}</h2>
+          <p class="c-vm">${v.version ? `${verLabel(v.version)} · ` : ""}${esc(v.channel || "")}${v.seconds ? ` · ${dur(v.seconds)}` : ""}${v.views ? ` · ${views(v.views)} views` : ""}
             · <a href="${watchUrl(id)}" target="_blank" rel="noopener">${isVm(id) ? "Vimeo" : "YouTube"} ${SVG(IC.ext, 13)}</a></p>
+          ${v.eq?.length || v.pattern ? `<p class="c-tags">${v.pattern ? `<span>${esc(v.pattern)}</span>` : ""}${(v.eq || []).map((k) => `<span>${EQ_LABEL[k] || k}</span>`).join("")}</p>` : ""}
+          ${cueList(v.cues)}
+          ${v.easier || v.harder || v.travel ? `<div class="c-variants">${variantBtn("Easier", v.easier, v.version)}${variantBtn("Harder", v.harder, v.version)}${variantBtn("No gear", v.travel, v.version)}</div>` : ""}
           ${saved
-            ? `<div class="c-saved-line">${SVG(IC.star, 16)} Saved as <b>${esc(saved.exercise_name)}</b> <button class="c-link" data-del="${saved.id}">Remove</button></div>`
-            : `<form class="c-save" id="c-save"><label><span>Exercise this shows</span><input id="c-ex" value="${esc(guessExercise(v.title))}" required></label>
-               <button class="btn primary">${SVG(IC.star, 17)}Save as demo</button></form>`}
+            ? `<div class="c-saved-line">${SVG(IC.check, 16)} In your Library as <b>${esc(saved.exercise_name)}</b> <button class="c-link" data-del="${saved.id}">Remove</button></div>`
+            : `<form class="c-save" id="c-save"><label><span>Name in your Library</span><input id="c-ex" value="${esc(defName)}" required></label>
+               <label class="c-select"><span class="sr">Type</span><select id="c-kind"><option value="exercise" ${v.kind !== "workout" ? "selected" : ""}>Exercise</option><option value="workout" ${v.kind === "workout" ? "selected" : ""}>Workout</option></select></label>
+               <button class="btn primary">${SVG(IC.plus, 17)}Add to Library</button></form>`}
         </div>
       </div>`;
     m.hidden = false;
@@ -432,10 +555,8 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
       e.preventDefault();
       const name = m.querySelector("#c-ex").value.trim();
       if (!name) return;
-      const { error } = await db.from("coach_demos").insert({ video_id: id, exercise_name: name, title: v.title, seconds: v.seconds || null, channel: v.channel || null });
-      if (error) return toast(error.message);
-      await loadDemos();
-      toast(`Saved as ${name}`);
+      if (!(await addToLib(v, name, m.querySelector("#c-kind").value))) return;
+      toast(`Added ${name}`);
       closePlayer();
       render();
     });
@@ -452,10 +573,36 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     if (!t) return;
     if (t.dataset.close !== undefined) return closePlayer();
     if (t.hasAttribute("data-exit")) return close();
-    if (t.dataset.nav) { st.view = t.dataset.nav; if (st.view === "programs") st.prog = null; return render(); }
-    if (t.dataset.ch) { Object.assign(st.lib, { channel: t.dataset.ch, tab: "videos", shown: PAGE }); return render(); }
-    if (t.hasAttribute("data-demos")) { st.lib.tab = "demos"; return render(); }
+    if (t.dataset.nav) {
+      st.view = t.dataset.nav; if (st.view === "programs") st.prog = null;
+      if (t.dataset.libtab) st.lib.tab = t.dataset.libtab;
+      return render();
+    }
+    if (t.dataset.libtab) { closePlayer(); Object.assign(st.lib, { tab: t.dataset.libtab, shown: PAGE }); return render(); }
+    if (t.dataset.src) { Object.assign(st.lib, { src: t.dataset.src, shown: PAGE, eq: "all", kind: "all", pattern: "all" }); return render(); }
+    for (const k of ["kind", "eq", "version", "lkind", "leq"]) {
+      if (t.dataset[k] !== undefined) { st.lib[k] = t.dataset[k]; st.lib.shown = PAGE; return render(); }
+    }
     if (t.dataset.bucket) { Object.assign(st.lib, { bucket: t.dataset.bucket, shown: PAGE }); return render(); }
+    if (t.dataset.quick) {
+      const id = t.dataset.quick, saved = inLib(id);
+      t.disabled = true;
+      if (saved) {
+        if (await removeFromLib(saved.id)) toast(`Removed ${saved.exercise_name}`);
+      } else {
+        const v = browseItem(id);
+        if (v && (await addToLib(v))) toast(`Added ${v.name}`);
+      }
+      t.disabled = false;
+      if (!st.lib.showIn && !saved && inLib(id)) return render();
+      const on = !!inLib(id);
+      t.classList.toggle("on", on); t.setAttribute("aria-pressed", on);
+      t.title = on ? "In your Library" : "Add to Library";
+      t.setAttribute("aria-label", on ? "In your Library. Tap to remove" : "Add to Library");
+      t.innerHTML = SVG(on ? IC.check : IC.plus, 17);
+      refreshBadges();
+      return;
+    }
     if (t.id === "c-clean") { st.lib.clean = !st.lib.clean; st.lib.shown = PAGE; return render(); }
     if (t.id === "c-more") { st.lib.shown += PAGE; return render(); }
     if (t.dataset.vid) return openPlayer(t.dataset.vid);
@@ -500,10 +647,9 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
       return render();
     }
     if (t.dataset.del) {
-      await db.from("coach_demos").delete().eq("id", t.dataset.del);
-      await loadDemos();
+      if (!(await removeFromLib(t.dataset.del))) return;
       closePlayer();
-      toast("Removed");
+      toast("Removed from your Library");
       return render();
     }
   });
@@ -538,15 +684,18 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
   });
   root.addEventListener("change", (e) => {
     if (e.target.id === "c-sort") { st.lib.sort = e.target.value; st.lib.shown = PAGE; render(); }
+    if (e.target.id === "c-pattern") { st.lib.pattern = e.target.value === "All movements" ? "all" : e.target.value; st.lib.shown = PAGE; render(); }
+    if (e.target.id === "c-showin") { st.lib.showIn = e.target.checked; st.lib.shown = PAGE; render(); }
   });
   root.addEventListener("input", (e) => {
-    if (e.target.id !== "c-q") return;
+    const fid = e.target.id;
+    if (fid !== "c-q" && fid !== "c-lq") return;
     clearTimeout(qTimer);
     qTimer = setTimeout(async () => {
-      st.lib.q = e.target.value; st.lib.shown = PAGE;
+      st.lib[fid === "c-q" ? "q" : "lq"] = e.target.value; st.lib.shown = PAGE;
       const pos = e.target.selectionStart;
       await render();
-      const q = root.querySelector("#c-q");
+      const q = root.querySelector("#" + fid);
       if (q) { q.focus(); q.setSelectionRange(pos, pos); }
     }, 250);
   });

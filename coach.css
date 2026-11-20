@@ -367,3 +367,32 @@ body > .c-modal { z-index: 75; }
 
 .bld-name.bad { border-bottom-color: #e5484d; }
 .bld-name.bad::placeholder { color: #e5484d; }
+
+/* Library / Browse */
+.c-tabs.big button { font-size: 15px; padding: 14px 18px; }
+.c-tabs button i { font-style: normal; margin-left: 6px; color: var(--muted); letter-spacing: 0; }
+.c-kind { position: absolute; left: 6px; bottom: 6px; padding: 3px 7px; border-radius: 6px; background: rgba(0,0,0,.72); color: #ddd;
+  font: 600 10px/1.2 var(--display); text-transform: uppercase; letter-spacing: .12em; }
+.c-kind.workout { background: rgba(251,67,17,.88); color: #fff; }
+.c-kind.inline { position: static; display: inline-block; vertical-align: middle; margin-left: 8px; background: var(--line); color: var(--muted); }
+.c-kind.inline.workout { background: rgba(251,67,17,.2); color: var(--accent); }
+.c-demo .c-add { left: auto; right: 6px; top: 6px; }
+.c-demo .c-add.on { background: var(--accent); color: #fff; }
+.c-check { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); font: 600 14px/1 Inter, sans-serif; cursor: pointer; }
+.c-check input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+.c-check i { font-style: normal; color: var(--muted); font-weight: 500; }
+.c-chip-sep { width: 1px; align-self: stretch; background: var(--line); margin: 4px 2px; }
+.c-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.c-tags span { padding: 4px 9px; border-radius: 999px; background: var(--line); font-size: 12px; color: var(--ink); }
+.c-cues { margin: 14px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; color: var(--ink); }
+.c-variants { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.c-variants .c-chip { height: 34px; font-size: 13px; }
+.c-save .c-select select { width: 100%; height: 46px; }
+@media (max-width: 700px) {
+  .c-tools .c-check { width: 100%; }
+  .c-chip-sep { display: none; }
+}
+.c-demo .c-vid { width: 100%; }
+.c-modal-box.side { width: min(1040px, 100%); display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+.c-player.side { flex: 0 0 auto; width: min(560px, 100%); }

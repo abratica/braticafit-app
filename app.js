@@ -2089,7 +2089,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=8");
+    const m = await import("./coach.js?v=9");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
