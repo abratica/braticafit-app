@@ -272,7 +272,7 @@ export function createTrain(ctx) {
       if (t.hasAttribute("data-b-dup")) { await opts.onDuplicate(payload()); return close(); }
       if (t.hasAttribute("data-b-save")) {
         const p = payload();
-        if (!p.title) return toast("Give the workout a name");
+        if (!p.title) { const n = el.querySelector('[data-b="title"]'); n?.classList.add("bad"); n?.focus(); return toast("Give the workout a name"); }
         if (p.kind === "video" && !p.video_id) return toast("Pick a video");
         if (p.kind === "written" && !p.exercises.length) return toast("Add at least one exercise");
         t.disabled = true;

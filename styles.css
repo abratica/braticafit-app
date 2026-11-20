@@ -177,7 +177,7 @@ h3::before { content: ""; width: 16px; height: 3px; border-radius: 2px; backgrou
 .bottom-nav .dot { position: absolute; top: 7px; left: calc(50% + 8px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 40;
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 90;
   background: var(--ink); color: #0d0d0d; padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 500;
   max-width: 90vw;
 }

@@ -364,3 +364,6 @@ body > .c-modal { z-index: 75; }
   .c-table th:nth-child(5), .c-table td:nth-child(5), .c-table th:nth-child(6), .c-table td:nth-child(6) { display: none; }
 }
 .c-back { align-self: flex-start; }
+
+.bld-name.bad { border-bottom-color: #e5484d; }
+.bld-name.bad::placeholder { color: #e5484d; }
