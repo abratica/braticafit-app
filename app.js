@@ -114,6 +114,8 @@ function openSheet(html) {
 function closeSheet() {
   stopScanner();
   stopRecap();
+  // Remove any video or audio so it stops playing (hiding the sheet alone leaves it running).
+  $("#sheet-body").querySelectorAll("iframe, video, audio").forEach((el) => el.remove());
   $("#sheet").hidden = true;
   document.body.style.overflow = "";
 }
