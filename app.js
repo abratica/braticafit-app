@@ -312,9 +312,9 @@ async function renderHome(highlightId) {
 
   app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
   $("#plan")?.addEventListener("click", () => openPlanner());
-  $("#snap").addEventListener("click", () => $("#camera").click());
-  $("#type").addEventListener("click", openTextLog);
-  $("#scan").addEventListener("click", openScanner);
+  $("#snap").addEventListener("click", () => { logTo = { day: null, meal: null }; $("#camera").click(); });
+  $("#type").addEventListener("click", () => { logTo = { day: null, meal: null }; openTextLog(); });
+  $("#scan").addEventListener("click", () => { logTo = { day: null, meal: null }; openScanner(); });
   $("#recap").addEventListener("click", openRecap);
   bindCheckins(app, () => renderHome());
   showInstallBar();
@@ -616,6 +616,41 @@ function confirmDelete(name) {
 // Food: log, today's numbers, what you've logged, My foods
 // ---------------------------------------------------------------------------
 let foodSeg = "today";
+let foodDay = null; // "YYYY-MM-DD" shown on the Food tab; null = today
+
+const MEALS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snacks"]];
+const mealLabel = (k) => MEALS.find((m) => m[0] === k)?.[1] ?? "";
+// Entries saved before meals existed fall back to the time they were eaten.
+function mealOf(m) {
+  if (m.meal) return m.meal;
+  const h = new Date(m.eaten_at).getHours();
+  return h < 11 ? "breakfast" : h < 16 ? "lunch" : h < 21 ? "dinner" : "snack";
+}
+const parseDay = (s) => { const [y, mo, d] = s.split("-").map(Number); return new Date(y, mo - 1, d); };
+
+// Where the next log goes: a day picked on the Food tab, and a meal when logged from a meal's +.
+let logTo = { day: null, meal: null };
+function defaultWhen() {
+  if (logTo.day && logTo.day !== ymd()) { const d = parseDay(logTo.day); d.setHours(12, 0, 0, 0); return localInputValue(d); }
+  return localInputValue();
+}
+// Meal picker for the log sheets: nothing is pre-picked unless they came from a meal's +.
+const mealPickerHtml = () => `<div class="field"><span class="muted small">Meal</span>
+  <div class="seg seg-wide meal-pick" id="mp">${MEALS.map(([k, l]) => `<button type="button" data-meal="${k}" aria-pressed="${k === logTo.meal}">${l}</button>`).join("")}</div></div>`;
+function bindMealPicker(body) {
+  const box = $("#mp", body);
+  box.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-meal]");
+    if (!b) return;
+    box.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    box.classList.remove("need");
+  });
+  return () => {
+    const v = box.querySelector('[aria-pressed="true"]')?.dataset.meal ?? null;
+    if (!v) { box.classList.add("need"); box.scrollIntoView({ behavior: "smooth", block: "center" }); toast("Pick a meal"); }
+    return v;
+  };
+}
 const foodSegHtml = () => `<div class="seg seg-wide" id="fseg" style="margin:6px 0 4px">
   <button data-v="today" aria-pressed="${foodSeg === "today"}">Today</button><button data-v="mine" aria-pressed="${foodSeg === "mine"}">My foods</button></div>`;
 function bindFoodSeg() {
@@ -623,6 +658,7 @@ function bindFoodSeg() {
     const b = e.target.closest("[data-v]");
     if (!b || b.dataset.v === foodSeg) return;
     foodSeg = b.dataset.v;
+    logTo = { day: foodDay, meal: null };
     renderFood();
   });
 }
@@ -648,47 +684,111 @@ function targetCard(g, t) {
 
 async function renderFood() {
   if (foodSeg === "mine") { await renderFoods(foodSegHtml()); bindFoodSeg(); return; }
-  $("#sub").textContent = dayFmt.format(new Date());
-  const [{ data: meals }, { data: goal }] = await Promise.all([
-    db.from("meals").select("id,name,servings,nutrients,eaten_at,energy,stomach,food_id")
-      .gte("eaten_at", startOfToday().toISOString()).order("eaten_at", { ascending: false }),
+  const todayStr = ymd();
+  if (foodDay && foodDay >= todayStr) foodDay = null;
+  const dayStr = foodDay ?? todayStr;
+  const isToday = dayStr === todayStr;
+  const day = parseDay(dayStr);
+  const wkStart = weekStart(day); wkStart.setHours(0, 0, 0, 0);
+  const wkEnd = addDays(wkStart, 7);
+  $("#sub").textContent = isToday ? dayFmt.format(new Date()) : dayFmt.format(day);
+
+  const [{ data: week }, { data: goal }] = await Promise.all([
+    db.from("meals").select("id,name,servings,nutrients,eaten_at,energy,stomach,food_id,meal")
+      .gte("eaten_at", wkStart.toISOString()).lt("eaten_at", wkEnd.toISOString()).order("eaten_at", { ascending: true }),
     db.from("nutrition_targets").select("kcal,protein_g,carbs_g,fat_g").maybeSingle(),
   ]);
-  const t = sumNutrients((meals ?? []).map((m) => m.nutrients));
+  const all = week ?? [];
+  const logged = new Set(all.map((m) => ymd(new Date(m.eaten_at))));
+  const meals = all.filter((m) => ymd(new Date(m.eaten_at)) === dayStr);
+  const t = sumNutrients(meals.map((m) => m.nutrients));
   const kcal = r0(t.kcal);
   const share = (g, per) => (kcal ? Math.round((g * per * 100) / kcal) : 0);
   const bar = (name, g, per) => `<div class="mbar"><div class="mbar-top"><span>${name}</span><b>${r0(g)}g${kcal ? ` <i>· ${share(g, per)}% of calories</i>` : ""}</b></div>
     <div class="mbar-track"><div style="width:${Math.min(100, share(g, per))}%"></div></div></div>`;
 
+  const days = Array.from({ length: 7 }, (_, i) => addDays(wkStart, i));
+  const strip = `<div class="wk">
+      <button class="wk-nav" data-wk="-7" aria-label="Previous week">‹</button>
+      ${days.map((d) => {
+        const k = ymd(d), future = k > todayStr;
+        return `<button class="wk-day${k === todayStr ? " is-today" : ""}" data-day="${k}" ${k === dayStr ? 'aria-current="date"' : ""} ${future ? "disabled" : ""}>
+          <span>${"MTWTFSS"[(d.getDay() + 6) % 7]}</span><b>${d.getDate()}</b><i class="${logged.has(k) ? "dot" : ""}"></i></button>`;
+      }).join("")}
+      <button class="wk-nav" data-wk="7" aria-label="Next week" ${ymd(wkEnd) > todayStr ? "disabled" : ""}>›</button>
+    </div>
+    ${isToday ? "" : `<button class="today-pill" id="back-today">Back to today</button>`}`;
+
+  const sections = MEALS.map(([k, l]) => {
+    const list = meals.filter((m) => mealOf(m) === k);
+    const kc = r0(sumNutrients(list.map((m) => m.nutrients)).kcal);
+    return `<section class="meal-sec">
+      <div class="meal-head"><h3>${l}</h3><span class="${list.length ? "" : "muted"}">${list.length ? `${kc.toLocaleString()} cal` : "Nothing yet"}</span>
+        <button class="meal-add" data-add="${k}" aria-label="Log to ${l}">+</button></div>
+      ${list.length ? `<div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${list.map((m) => `
+        <li><button class="row" data-meal="${m.id}">
+          <div class="main"><div class="name">${esc(m.name)}${m.servings != 1 ? ` <span class="badge">×${m.servings}</span>` : ""}</div>
+          <div class="meta">${timeFmt.format(new Date(m.eaten_at))} · ${macroLine(m.nutrients)}</div></div>
+          <div class="end">${feelBadge(m)}</div>
+        </button></li>`).join("")}</ul></div>` : ""}
+    </section>`;
+  }).join("");
+
   app.innerHTML = `
     ${foodSegHtml()}
+    ${strip}
     <div class="log-actions" style="margin-top:12px">
       <button class="btn primary wide" id="snap">${ICO.camera}Snap food</button>
       <button class="btn" id="scan">${ICO.scan}Scan barcode</button>
       <button class="btn" id="type">${ICO.type}Type it</button>
     </div>
-    <h3>Today, roughly</h3>
+    <h3>${isToday ? "Today, roughly" : `${dayFmt.format(day)}, roughly`}</h3>
     ${goal ? targetCard(goal, t) : `<div class="card">
-      <div class="kcal"><b>${kcal.toLocaleString()}</b><span>calories so far</span></div>
+      <div class="kcal"><b>${kcal.toLocaleString()}</b><span>calories ${isToday ? "so far" : "that day"}</span></div>
       ${bar("Protein", t.protein, 4)}${bar("Carbs", t.carbs, 4)}${bar("Fat", t.fat, 9)}
       <button class="btn block" id="set-targets" style="margin-top:14px">Set daily targets</button>
     </div>`}
-    <h3>Logged today</h3>
-    ${(meals ?? []).length
-      ? `<div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${meals.map((m) => `
-          <li><button class="row" data-meal="${m.id}">
-            <div class="main"><div class="name">${esc(m.name)}${m.servings != 1 ? ` <span class="badge">×${m.servings}</span>` : ""}</div>
-            <div class="meta">${timeFmt.format(new Date(m.eaten_at))} · ${macroLine(m.nutrients)}</div></div>
-            <div class="end">${feelBadge(m)}</div>
-          </button></li>`).join("")}</ul></div>`
-      : `<p class="empty">Nothing logged yet today.</p>`}`;
+    ${sections}`;
   bindFoodSeg();
+  const here = () => ({ day: foodDay, meal: null });
   $("#set-targets")?.addEventListener("click", openTargets);
   $("#edit-targets")?.addEventListener("click", openTargets);
-  $("#snap").addEventListener("click", () => $("#camera").click());
-  $("#type").addEventListener("click", openTextLog);
-  $("#scan").addEventListener("click", openScanner);
+  $("#snap").addEventListener("click", () => { logTo = here(); $("#camera").click(); });
+  $("#type").addEventListener("click", () => { logTo = here(); openTextLog(); });
+  $("#scan").addEventListener("click", () => { logTo = here(); openScanner(); });
+  $("#back-today")?.addEventListener("click", () => { foodDay = null; renderFood(); });
+  app.querySelector(".wk").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    if (b.dataset.day) foodDay = b.dataset.day === todayStr ? null : b.dataset.day;
+    if (b.dataset.wk) { const k = ymd(addDays(day, Number(b.dataset.wk))); foodDay = k >= todayStr ? null : k; }
+    renderFood();
+  });
+  app.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => openMealAdd(b.dataset.add)));
   app.querySelectorAll("[data-meal]").forEach((b) => b.addEventListener("click", () => openMeal(b.dataset.meal)));
+}
+
+// The + on a meal: pick how to log, with that meal already chosen.
+function openMealAdd(meal) {
+  const body = openSheet(`
+    <h2>Log to ${mealLabel(meal)}</h2>
+    ${foodDay ? `<p class="small muted" style="margin-top:-4px">${dayFmt.format(parseDay(foodDay))}</p>` : ""}
+    <div class="add-grid">
+      <button class="btn" data-how="snap">${ICO.camera}Snap</button>
+      <button class="btn" data-how="scan">${ICO.scan}Scan</button>
+      <button class="btn" data-how="type">${ICO.type}Type</button>
+      <button class="btn" data-how="mine">My foods</button>
+    </div>`);
+  body.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-how]");
+    if (!b) return;
+    logTo = { day: foodDay, meal };
+    const how = b.dataset.how;
+    if (how === "snap") { closeSheet(); $("#camera").click(); }
+    if (how === "scan") openScanner();
+    if (how === "type") openTextLog();
+    if (how === "mine") { closeSheet(); foodSeg = "mine"; renderFood(); }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,9 +1143,20 @@ async function openMeal(id) {
       <div><b>${r0(n.fat)}g</b><span>fat</span></div>
     </div>
     <p class="small muted">Saturated fat ${r0(n.sat_fat)}g · fiber ${r0(n.fiber)}g · sodium ${r0(n.sodium)}mg</p>
+    <div class="field"><span class="muted small">Meal</span>
+      <div class="seg seg-wide meal-pick" id="mv">${MEALS.map(([k, l]) => `<button type="button" data-meal="${k}" aria-pressed="${k === mealOf(m)}">${l}</button>`).join("")}</div></div>
     ${checkinCard(m)}
     <button class="btn danger block" id="del">Delete this entry</button>`);
   bindCheckins(body, () => { closeSheet(); go(tab); });
+  $("#mv", body).addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-meal]");
+    if (!b || b.getAttribute("aria-pressed") === "true") return;
+    const { error } = await db.from("meals").update({ meal: b.dataset.meal }).eq("id", id);
+    if (error) return toast(error.message);
+    $("#mv", body).querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    toast(`Moved to ${mealLabel(b.dataset.meal)}`);
+    if (tab === "food") renderFood();
+  });
   $("#del", body).addEventListener("click", async () => {
     await db.from("meals").delete().eq("id", id);
     closeSheet();
@@ -1210,7 +1321,8 @@ function review(result, meta) {
     ${result.note ? `<p class="small muted">${esc(result.note)}</p>` : ""}
     <div class="field"><span class="muted small">Servings</span>
       <div class="seg" id="sv">${[0.5, 1, 1.5, 2].map((v) => `<button data-v="${v}" aria-pressed="${v === 1}">${v === 0.5 ? "½" : v === 1.5 ? "1½" : v}</button>`).join("")}</div></div>
-    <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${localInputValue()}"></label>
+    ${mealPickerHtml()}
+    <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${defaultWhen()}"></label>
     <div class="card totals" id="tot"></div>
     <button class="btn primary block" id="save">Save & log it</button>
     <p class="small muted" style="text-align:center;margin-top:8px">It'll be saved to My foods for one-tap logging next time.</p>`);
@@ -1257,8 +1369,11 @@ function review(result, meta) {
     draw();
   });
 
+  const pickedMeal = bindMealPicker(body);
   $("#save", body).addEventListener("click", async () => {
     if (!items.length) return toast("Nothing to save");
+    const meal = pickedMeal();
+    if (!meal) return;
     $("#save", body).disabled = true;
     const perServing = sumNutrients(items.map((i) => i.nutrients));
     const name = $("#nm", body).value.trim() || result.name;
@@ -1273,12 +1388,13 @@ function review(result, meta) {
       barcode: meta.barcode ?? null,
     }).select().single();
     if (error) { $("#save", body).disabled = false; return toast(error.message); }
-    await logFood(food, servings, new Date($("#at", body).value || Date.now()));
+    await logFood(food, servings, new Date($("#at", body).value || Date.now()), meal);
   });
 }
 
-async function logFood(food, servings, eatenAt) {
+async function logFood(food, servings, eatenAt, meal) {
   const { error } = await db.from("meals").insert({
+    meal,
     food_id: food.id,
     name: food.name,
     servings,
@@ -1290,8 +1406,10 @@ async function logFood(food, servings, eatenAt) {
   await db.from("foods").update({ times_logged: (food.times_logged ?? 0) + 1, last_logged_at: new Date().toISOString() }).eq("id", food.id);
   closeSheet();
   const due = new Date(eatenAt.getTime() + 2 * 3600e3);
-  toast(due > new Date() ? `Logged. I'll check in around ${timeFmt.format(due)}.` : "Logged");
+  toast(due > new Date() ? `Logged to ${mealLabel(meal)}. I'll check in around ${timeFmt.format(due)}.` : `Logged to ${mealLabel(meal)}`);
   foodSeg = "today";
+  foodDay = ymd(eatenAt) === ymd() ? null : ymd(eatenAt);
+  logTo = { day: null, meal: null };
   go("food");
 }
 
@@ -1335,7 +1453,8 @@ function openFood(food) {
     <p class="muted small">${esc(food.portion_label || "")}</p>
     <div class="field"><span class="muted small">Servings</span>
       <div class="seg" id="sv">${[0.5, 1, 1.5, 2].map((v) => `<button data-v="${v}" aria-pressed="${v === 1}">${v === 0.5 ? "½" : v === 1.5 ? "1½" : v}</button>`).join("")}</div></div>
-    <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${localInputValue()}"></label>
+    ${mealPickerHtml()}
+    <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${defaultWhen()}"></label>
     <div class="card totals" id="tot"></div>
     <button class="btn primary block" id="log">Log it</button>
     <button class="btn danger block" id="rm" style="margin-top:10px">Remove from My foods</button>`);
@@ -1353,7 +1472,11 @@ function openFood(food) {
     $("#sv", body).querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
     draw();
   });
-  $("#log", body).addEventListener("click", () => logFood(food, servings, new Date($("#at", body).value || Date.now())));
+  const pickedMeal = bindMealPicker(body);
+  $("#log", body).addEventListener("click", () => {
+    const meal = pickedMeal();
+    if (meal) logFood(food, servings, new Date($("#at", body).value || Date.now()), meal);
+  });
   $("#rm", body).addEventListener("click", async () => {
     await db.from("foods").delete().eq("id", food.id);
     closeSheet();
