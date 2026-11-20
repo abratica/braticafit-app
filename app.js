@@ -25,6 +25,8 @@ const STOMACH = [["great", "Great"], ["fine", "Fine"], ["bloated", "Bloated"], [
 let user = null;
 let tab = "today";
 let isCoach = false;
+// Switches the coach sets per client (Settings on their client page). The coach always gets everything.
+let features = { food: true, weight: true, targets_edit: true, move_days: true };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -194,6 +196,7 @@ function renderSignIn() {
 // ---------------------------------------------------------------------------
 const VIEWS = { today: renderHome, train: renderTrain, food: renderFood, progress: renderProgress, coach: renderCoach, settings: renderSettings };
 function go(next) {
+  if (next === "food" && !features.food) next = "today";
   tab = next;
   document.body.classList.remove("has-composer");
   for (const b of document.querySelectorAll("#tabs button")) {
@@ -297,13 +300,13 @@ async function renderHome(highlightId) {
     <div id="install-slot"></div>
     <h3>Today's workout</h3>
     ${workout}
-    <h3>Log food</h3>
+    ${features.food ? `<h3>Log food</h3>
     <div class="log-row">
       <button class="btn" id="snap">${ICO.camera}Snap</button>
       <button class="btn" id="scan">${ICO.scan}Scan</button>
       <button class="btn" id="type">${ICO.search}Search</button>
     </div>
-    ${(pending ?? []).length ? `<h3>How do you feel?</h3>${pending.map(checkinCard).join("")}` : ""}
+    ${(pending ?? []).length ? `<h3>How do you feel?</h3>${pending.map(checkinCard).join("")}` : ""}` : ""}
     <h3>Daily recap</h3>
     <button class="recap-btn" id="recap">
       <span class="recap-ico ${recapDone ? "done" : ""}">${recapDone ? ICO.check : ICO.mic}</span>
@@ -313,9 +316,9 @@ async function renderHome(highlightId) {
 
   app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
   $("#plan")?.addEventListener("click", () => openPlanner());
-  $("#snap").addEventListener("click", () => { logTo = { day: null, meal: null }; $("#camera").click(); });
-  $("#type").addEventListener("click", () => { logTo = { day: null, meal: null }; openSearch(); });
-  $("#scan").addEventListener("click", () => { logTo = { day: null, meal: null }; openScanner(); });
+  $("#snap")?.addEventListener("click", () => { logTo = { day: null, meal: null }; $("#camera").click(); });
+  $("#type")?.addEventListener("click", () => { logTo = { day: null, meal: null }; openSearch(); });
+  $("#scan")?.addEventListener("click", () => { logTo = { day: null, meal: null }; openScanner(); });
   $("#recap").addEventListener("click", openRecap);
   bindCheckins(app, () => renderHome());
   showInstallBar();
@@ -415,7 +418,7 @@ async function renderTrain() {
     const end = w.completed_at ? `<span class="ok">${ICO.check}</span>` : `<span class="go">${w.scheduled_on === today ? "Start" : "Open"}</span>`;
     return `<li><button class="row" data-open="${w.id}">
       <span class="ico-box">${w.kind === "video" ? ICO.video : ICO.train}</span>
-      <div class="main"><div class="name">${esc(w.title)}</div><div class="meta">${workoutMeta(w, nEx)} · ${w.completed_at ? `done ${when}` : when}</div></div>
+      <div class="main"><div class="name">${esc(w.title)}</div><div class="meta">${workoutMeta(w, nEx)} · ${w.completed_at ? `done ${when}` : when}${w.time_of_day ? ` · ${w.time_of_day}` : ""}</div></div>
       <div class="end">${end}</div></button></li>`;
   };
 
@@ -608,7 +611,9 @@ async function openSession(id) {
       ? `<div class="done-line" style="margin-top:16px">${ICO.check}<span>Done${w.feel ? ` · felt ${feelLabel(FEEL, w.feel).toLowerCase()}` : ""}</span></div>
          <button class="btn ghost block" id="undo" style="margin-top:10px">Mark not done</button>`
       : `<button class="btn primary block" id="finish" style="margin-top:16px">${w.kind === "video" ? "Mark done" : "Finish workout"}</button>`}
-    <button class="btn danger block" id="del-w" style="margin-top:10px">Delete workout</button>`;
+    ${!w.completed_at && (isCoach || features.move_days) ? `<div class="move-row"><label class="field"><span>Move to another day</span>
+      <input class="input" id="mv-day" type="date" value="${w.scheduled_on}"></label><button class="btn ghost" id="mv-go">Move</button></div>` : ""}
+    ${isCoach || !w.assigned ? `<button class="btn danger block" id="del-w" style="margin-top:10px">Delete workout</button>` : ""}`;
 
   $("#back").addEventListener("click", () => { stopRest(); go(back); });
   app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>Demo</h2>${player(b.dataset.demo)}`)));
@@ -674,7 +679,16 @@ async function openSession(id) {
     await db.from("workouts").update({ completed_at: null, feel: null }).eq("id", w.id);
     openSession(w.id);
   });
-  $("#del-w").addEventListener("click", async () => {
+  $("#mv-go")?.addEventListener("click", async () => {
+    const day = $("#mv-day").value;
+    if (!day || day === w.scheduled_on) return toast("Pick a different day");
+    const { error } = await db.from("workouts").update({ scheduled_on: day }).eq("id", w.id);
+    if (error) return toast(error.message);
+    stopRest();
+    toast(`Moved to ${dayFmt.format(fromYmd(day))}`);
+    go(back);
+  });
+  $("#del-w")?.addEventListener("click", async () => {
     if (!confirmDelete(w.title)) return;
     await db.from("workouts").delete().eq("id", w.id);
     toast("Deleted");
@@ -951,7 +965,7 @@ function targetCard(g, t) {
       <div class="${left < 0 ? "neg" : "rem"}"><b>${Math.abs(left).toLocaleString()}</b><span>${left < 0 ? "Over" : "Remaining"}</span></div>
     </div>
     ${bar("Protein", t.protein, g.protein_g)}${bar("Carbs", t.carbs, g.carbs_g)}${bar("Fat", t.fat, g.fat_g)}
-    <button class="auth-link t-edit" id="edit-targets">Edit targets</button>
+    ${features.targets_edit ? `<button class="auth-link t-edit" id="edit-targets">Edit targets</button>` : ""}
   </div>`;
 }
 
@@ -1019,7 +1033,7 @@ async function renderFood() {
     ${goal ? targetCard(goal, t) : `<div class="card">
       <div class="kcal"><b>${kcal.toLocaleString()}</b><span>calories ${isToday ? "so far" : "that day"}</span></div>
       ${bar("Protein", t.protein, 4)}${bar("Carbs", t.carbs, 4)}${bar("Fat", t.fat, 9)}
-      <button class="btn block" id="set-targets" style="margin-top:14px">Set daily targets</button>
+      ${features.targets_edit ? `<button class="btn block" id="set-targets" style="margin-top:14px">Set daily targets</button>` : ""}
     </div>`}
     ${sections}`;
   bindFoodSeg();
@@ -1281,11 +1295,11 @@ async function renderProgress() {
       <div class="stat"><b>${checkins}</b><span>Check-ins</span></div>
     </div>
 
-    <h3>Weight</h3>
+    ${features.weight ? `<h3>Weight</h3>
     <div class="card">
       ${ws.length ? `<div class="wt-top"><b>${ws[ws.length - 1].weight_lb} lb</b><span class="small muted">${dayFmt.format(new Date(ws[ws.length - 1].measured_at))}</span></div>${spark}` : `<p class="small muted" style="margin-top:0">Optional. Log it whenever you like and the trend shows here.</p>`}
       <form id="wf" class="wt-form"><input class="input" id="wt" type="number" inputmode="decimal" step="0.1" placeholder="lb" aria-label="Weight in pounds" required><button class="btn">Log</button></form>
-    </div>
+    </div>` : ""}
 
     ${isCoach ? `<h3>Summaries & patterns</h3>
     ${meals.length ? `<button class="btn ghost block" id="gen" style="margin-bottom:10px">Write my summary now</button>` : ""}
@@ -1297,7 +1311,7 @@ async function renderProgress() {
       </button>`).join("")
     : `<p class="empty">Your first weekly summary arrives Sunday morning. Patterns show up once something repeats a few times in your check-ins.</p>`}` : ""}`;
 
-  $("#wf").addEventListener("submit", async (e) => {
+  $("#wf")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const { error } = await db.from("weights").insert({ weight_lb: Number($("#wt").value) });
     if (error) return toast(error.message);
@@ -2064,7 +2078,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=5");
+    const m = await import("./coach.js?v=6");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
@@ -2095,6 +2109,12 @@ async function enter(session) {
     return;
   }
   isCoach = role === "coach";
+  features = { food: true, weight: true, targets_edit: true, move_days: true };
+  if (!isCoach) {
+    const { data: s } = await db.rpc("my_settings");
+    Object.assign(features, s ?? {});
+  }
+  $('#tabs button[data-tab="food"]').hidden = !features.food;
   claimThisDevice();
   $("#tabs").hidden = false;
   $("#settings").hidden = false;

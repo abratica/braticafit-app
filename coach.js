@@ -1,6 +1,8 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
+import { createTrain } from "./coach-train.js?v=1";
+
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
 const PAGE = 60;
 
@@ -75,7 +77,7 @@ const IC = {
 export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=4"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=5"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -85,6 +87,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
 
   const st = {
     view: ["dashboard", "library", "clients", "programs", "inbox", "calls"].includes(view) ? view : "dashboard", channels: [], data: {}, demos: [], members: [], requests: [], confirmRm: null, mail: null,
+    client: null, prog: null, progList: [],
     lib: { channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE, tab: "videos" },
   };
 
@@ -116,7 +119,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
       <aside class="c-side">
         <img class="c-wordmark" src="icons/wordmark.webp" alt="BraticaFit">
         <nav class="c-nav" aria-label="Coach">
-          ${nav.map(([k, label, ic]) => `<button data-nav="${k}" ${st.view === k ? 'aria-current="page"' : ""}>${SVG(IC[ic])}<span>${label}</span>
+          ${nav.map(([k, label, ic]) => `<button data-nav="${k}" ${st.view === k || (k === "clients" && st.view === "client") ? 'aria-current="page"' : ""}>${SVG(IC[ic])}<span>${label}</span>
             ${k === "library" && st.demos.length ? `<i class="c-badge">${st.demos.length}</i>` : ""}${k === "clients" && st.requests.length ? `<i class="c-badge hot">${st.requests.length}</i>` : ""}</button>`).join("")}
         </nav>
         <div class="c-side-foot">
@@ -132,16 +135,17 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     if (st.view === "dashboard") root.innerHTML = shell(await dashboard());
     else if (st.view === "library") root.innerHTML = shell(await library());
     else if (st.view === "clients") root.innerHTML = shell(await clients());
+    else if (st.view === "client" && st.client) root.innerHTML = shell(await train.clientView());
+    else if (st.view === "programs") root.innerHTML = shell(await train.programsView());
     else root.innerHTML = shell(soon());
     root.scrollTop = 0;
   }
 
   function soon() {
-    const what = { programs: ["Programs", "Templates you build once and assign as a copy with a start date."],
-      inbox: ["Inbox", "Voice notes from clients, tagged by exercise and set, with your replies."],
+    const what = { inbox: ["Inbox", "Voice notes from clients, tagged by exercise and set, with your replies."],
       calls: ["Calls", "Scheduled video calls with reminders and Join inside the app."] }[st.view];
     return `<header class="c-head"><div><p class="c-eyebrow">Next up</p><h1>${what[0]}</h1></div></header>
-      <section class="c-card c-empty"><p>${what[1]}</p><p class="muted">This part isn't built yet. The Library and dashboard are live.</p>
+      <section class="c-card c-empty"><p>${what[1]}</p><p class="muted">This part isn't built yet. Clients, Programs and the Library are live.</p>
       <button class="btn primary" data-nav="library">${SVG(IC.library, 18)}Go to the Library</button></section>`;
   }
 
@@ -216,8 +220,9 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
         ? `<button class="btn ghost c-rm" data-welcome="${m.id}">${m.welcomed_at ? "Resend welcome" : "Send welcome"}</button>` : "";
       const confirming = st.confirmRm === m.id;
       return `<li class="c-client">
-        <div class="c-client-who"><b>${esc(m.name || m.email)}</b>${m.name ? `<span class="c-vm">${esc(m.email)}</span>` : ""}</div>
+        <div class="c-client-who">${m.user_id ? `<button class="c-namelink" data-open-client="${m.user_id}">${esc(m.name || m.email)}</button>` : `<b>${esc(m.name || m.email)}</b>`}${m.name ? `<span class="c-vm">${esc(m.email)}</span>` : ""}</div>
         <div class="c-client-status">${status}</div>
+        ${m.user_id ? `<button class="btn primary c-rm" data-open-client="${m.user_id}">Open</button>` : ""}
         ${welcomeBtn}
         <button class="btn ${confirming ? "primary" : "ghost"} c-rm" data-rm="${m.id}">${confirming ? "Tap again to remove" : "Remove"}</button>
       </li>`;
@@ -246,25 +251,42 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     const now = new Date();
     const mon = new Date(now); mon.setHours(12, 0, 0, 0); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
     const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); return d; });
-    const { data: ws } = await db.from("workouts").select("scheduled_on,completed_at,title").gte("scheduled_on", ymd(days[0])).lte("scheduled_on", ymd(days[6]));
-    const week = ws ?? [];
-    const done = week.filter((w) => w.completed_at).length;
-    const totalVideos = st.channels.reduce((n, c) => n + (c.total || 0), 0);
+    const { data: ov, error } = await db.rpc("coach_overview", { p_from: ymd(days[0]), p_to: ymd(days[6]) });
+    if (error) toast(error.message);
+    const people = ov ?? [];
+    const clientsOnly = people.filter((p) => !p.is_me);
     const today = ymd(now);
     const fmt = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "short", day: "numeric" });
     const hr = now.getHours();
     const hello = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+    const totalVideos = st.channels.reduce((n, c) => n + (c.total || 0), 0);
+    const wDone = clientsOnly.reduce((n, p) => n + p.workouts.filter((w) => w.done).length, 0);
+    const wAll = clientsOnly.reduce((n, p) => n + p.workouts.length, 0);
 
-    const cells = days.map((d) => {
+    const cells = (p) => days.map((d) => {
       const key = ymd(d);
-      const items = week.filter((w) => w.scheduled_on === key);
+      const items = p.workouts.filter((w) => w.day === key);
       let cls = "rest", label = "Rest", inner = "–";
-      if (items.length && items.every((w) => w.completed_at)) { cls = "done"; label = "Done"; inner = SVG(IC.check, 16); }
+      if (items.length && items.every((w) => w.done)) { cls = "done"; label = "Done"; inner = SVG(IC.check, 16); }
       else if (items.length && key < today) { cls = "missed"; label = "Missed"; inner = SVG(IC.x, 14); }
       else if (items.length && key === today) { cls = "today"; label = "Today"; inner = "Today"; }
       else if (items.length) { cls = "planned"; label = "Planned"; inner = "<i></i>"; }
-      return `<span class="c-cell ${cls}" title="${label}${items[0] ? ": " + esc(items[0].title) : ""}">${inner}<span class="sr">${label}</span></span>`;
+      return `<span class="c-cell ${cls}" title="${label}${items[0] ? ": " + esc(items.map((w) => w.title).join(", ")) : ""}">${inner}<span class="sr">${label}</span></span>`;
     }).join("");
+
+    // Who needs a nudge: missed sessions, gone quiet, no food logs, rough sessions.
+    const flags = [];
+    for (const p of clientsOnly) {
+      const s = { food: true, ...(p.settings || {}) };
+      const missed = p.workouts.filter((w) => !w.done && w.day < today).length;
+      if (missed) flags.push([p, `Missed ${missed} workout${missed === 1 ? "" : "s"} this week`]);
+      const quiet = p.last_seen_at ? (Date.now() - new Date(p.last_seen_at)) / 864e5 : null;
+      if (quiet != null && quiet >= 4) flags.push([p, `Hasn't opened the app in ${Math.floor(quiet)} days`]);
+      if (s.food && p.food_days_7 <= 2) flags.push([p, `Logged food ${p.food_days_7} of the last 7 days`]);
+      if (p.last_feel === "rough") flags.push([p, "Last workout felt rough"]);
+      if (p.targets?.protein_g && p.avg_protein_7 != null && p.avg_protein_7 < p.targets.protein_g * 0.75) flags.push([p, `Protein averaging ${p.avg_protein_7}g of ${p.targets.protein_g}g`]);
+    }
+    const kcalLine = (p) => p.avg_kcal_7 == null ? "–" : `${Number(p.avg_kcal_7).toLocaleString()}${p.targets?.kcal ? ` <span class="c-vm">/ ${p.targets.kcal.toLocaleString()}</span>` : ""}`;
 
     let fresh = [];
     if (st.lib.channel) {
@@ -275,23 +297,29 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     return `
       <header class="c-head">
         <div><p class="c-eyebrow">${fmt.format(now)}</p><h1>${hello}, Andrew</h1></div>
-        <button class="btn primary" data-nav="library">${SVG(IC.library, 18)}Open Library</button>
+        <div class="c-head-act"><button class="btn ghost" data-nav="programs">${SVG(IC.programs, 18)}Programs</button>
+          <button class="btn primary" data-nav="clients">${SVG(IC.clients, 18)}Clients</button></div>
       </header>
       <div class="c-stats">
-        <div class="c-stat"><span>Demos saved</span><b class="accent">${st.demos.length}</b><em>${st.demos.length ? "Ready to attach to exercises" : "Star clips in the Library"}</em></div>
-        <div class="c-stat"><span>Library videos</span><b>${totalVideos.toLocaleString()}</b><em>${st.channels.length} channel${st.channels.length === 1 ? "" : "s"} scanned</em></div>
-        <div class="c-stat"><span>Your workouts</span><b>${done}/${week.length}</b><em>This week</em></div>
-        <div class="c-stat"><span>Inbox to-dos</span><b>0</b><em>Voice notes land here</em></div>
+        <div class="c-stat"><span>Clients</span><b class="accent">${clientsOnly.length}</b><em>${st.members.length - clientsOnly.length ? `${st.members.length - clientsOnly.length} invited, not joined` : "Joined and active"}</em></div>
+        <div class="c-stat"><span>Client workouts</span><b>${wDone}/${wAll}</b><em>Done this week</em></div>
+        <div class="c-stat"><span>Demos saved</span><b>${st.demos.length}</b><em>${totalVideos.toLocaleString()} library videos</em></div>
+        <div class="c-stat"><span>Needs attention</span><b>${new Set(flags.map(([p]) => p.user_id)).size}</b><em>${flags.length ? "See below" : "All good"}</em></div>
       </div>
       <div class="c-row">
         <section class="c-card grow"><h3>Needs attention</h3>
-          <p class="c-empty-line">No clients yet. Once clients are in, anyone who misses workouts, goes quiet, or logs a run of low-energy check-ins shows up here.</p></section>
+          ${flags.length ? `<ul class="c-flags">${flags.slice(0, 8).map(([p, why]) => `<li><button class="c-namelink" data-open-client="${p.user_id}">${esc(p.name)}</button><span>${esc(why)}</span></li>`).join("")}</ul>`
+            : `<p class="c-empty-line">${clientsOnly.length ? "Nobody's slipping right now." : "No clients yet. Once clients are in, anyone who misses workouts, goes quiet, or stops logging food shows up here."}</p>`}</section>
         <section class="c-card"><h3>Today's calls</h3><p class="c-empty-line">No calls scheduled.</p></section>
       </div>
       <section class="c-card"><h3>This week</h3>
-        <div class="c-week-scroll"><div class="c-week">
-          <div class="c-week-head"><span>Client</span>${days.map((d) => `<span>${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()}</span>`).join("")}<span>Done</span></div>
-          <div class="c-week-row"><span class="c-who"><img src="icons/logo.webp" alt="" width="28" height="28">Andrew (you)</span>${cells}<span class="c-done">${done}/${week.length}</span></div>
+        <div class="c-week-scroll"><div class="c-week wide">
+          <div class="c-week-head"><span>Who</span>${days.map((d) => `<span>${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()}</span>`).join("")}<span>Done</span><span>Food 7d</span><span>Avg cal</span><span>Protein</span></div>
+          ${people.map((p) => `<div class="c-week-row">
+            <span class="c-who"><button class="c-namelink" data-open-client="${p.user_id}">${p.is_me ? `<img src="icons/logo.webp" alt="" width="28" height="28">Andrew (you)` : esc(p.name)}</button></span>
+            ${cells(p)}<span class="c-done">${p.workouts.filter((w) => w.done).length}/${p.workouts.length}</span>
+            <span class="c-done">${p.settings?.food === false ? "off" : `${p.food_days_7}/7`}</span><span class="c-done">${kcalLine(p)}</span>
+            <span class="c-done">${p.avg_protein_7 != null ? `${p.avg_protein_7}g` : "–"}</span></div>`).join("")}
         </div></div>
       </section>
       ${fresh.length ? `<section class="c-card"><div class="c-card-head"><h3>Best demo matches</h3><button class="c-link" data-nav="library">See all</button></div>
@@ -419,13 +447,14 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     if (!t) return;
     if (t.dataset.close !== undefined) return closePlayer();
     if (t.hasAttribute("data-exit")) return close();
-    if (t.dataset.nav) { st.view = t.dataset.nav; return render(); }
+    if (t.dataset.nav) { st.view = t.dataset.nav; if (st.view === "programs") st.prog = null; return render(); }
     if (t.dataset.ch) { Object.assign(st.lib, { channel: t.dataset.ch, tab: "videos", shown: PAGE }); return render(); }
     if (t.hasAttribute("data-demos")) { st.lib.tab = "demos"; return render(); }
     if (t.dataset.bucket) { Object.assign(st.lib, { bucket: t.dataset.bucket, shown: PAGE }); return render(); }
     if (t.id === "c-clean") { st.lib.clean = !st.lib.clean; st.lib.shown = PAGE; return render(); }
     if (t.id === "c-more") { st.lib.shown += PAGE; return render(); }
     if (t.dataset.vid) return openPlayer(t.dataset.vid);
+    if (t.dataset.openClient) return train.openClient(t.dataset.openClient, st.view === "dashboard" ? "dashboard" : "clients");
     if (t.dataset.welcome) {
       const m = st.members.find((x) => x.id === t.dataset.welcome);
       t.disabled = true;
@@ -526,6 +555,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     exit();
   }
 
+  const train = createTrain({ db, esc, toast, SVG, IC, st, root, render, ago, user });
   root.innerHTML = shell(`<p class="c-empty-line">Loading…</p>`);
   await Promise.all([loadIndex(), loadDemos(), loadMembers()]);
   await render();
