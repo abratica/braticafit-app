@@ -385,3 +385,20 @@ a.btn.primary { color: var(--accent-ink); }
 .wordmark { height: 50px; }
 .coach-entry { display: flex; align-items: center; gap: 12px; }
 .coach-entry .main { flex: 1; }
+
+/* Daily targets */
+.kcal-eq { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: end; gap: 6px; margin-bottom: 16px; text-align: center; }
+.kcal-eq b { display: block; font: 600 26px/1 var(--display); }
+.kcal-eq span { display: block; margin-top: 6px; font: 500 11px/1 var(--display); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+.kcal-eq i { font-style: normal; color: var(--muted); font-size: 20px; padding-bottom: 14px; }
+.kcal-eq .rem b { color: var(--accent); }
+.kcal-eq .neg b { color: var(--ink); }
+.mbar.over .mbar-track div { background: repeating-linear-gradient(45deg, var(--accent) 0 6px, rgba(251,67,17,.55) 6px 12px); }
+.t-edit, .t-tune { display: block; margin: 14px auto 0; font-size: 14px; }
+.t-result { margin: 14px 0; }
+.t-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+.t-num b { display: block; font: 600 22px/1 var(--display); }
+.t-num span { display: block; margin-top: 6px; font: 500 10px/1 var(--display); text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.t-num input { text-align: center; padding: 8px 4px; font-weight: 600; }
+.unit { position: relative; display: block; }
+.unit i { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-style: normal; color: var(--muted); font-size: 13px; pointer-events: none; }

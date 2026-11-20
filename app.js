@@ -627,11 +627,33 @@ function bindFoodSeg() {
   });
 }
 
+// Goal − Food = Remaining, plus a bar per macro against its target.
+function targetCard(g, t) {
+  const food = r0(t.kcal), left = g.kcal - food;
+  const bar = (name, have, want) => {
+    const h = r0(have), over = h > want;
+    return `<div class="mbar${over ? " over" : ""}"><div class="mbar-top"><span>${name}</span><b>${h} <i>/ ${want}g${over ? ` · ${h - want} over` : ` · ${want - h} left`}</i></b></div>
+      <div class="mbar-track"><div style="width:${want ? Math.min(100, (h * 100) / want) : 0}%"></div></div></div>`;
+  };
+  return `<div class="card">
+    <div class="kcal-eq">
+      <div><b>${g.kcal.toLocaleString()}</b><span>Goal</span></div><i>−</i>
+      <div><b>${food.toLocaleString()}</b><span>Food</span></div><i>=</i>
+      <div class="${left < 0 ? "neg" : "rem"}"><b>${Math.abs(left).toLocaleString()}</b><span>${left < 0 ? "Over" : "Remaining"}</span></div>
+    </div>
+    ${bar("Protein", t.protein, g.protein_g)}${bar("Carbs", t.carbs, g.carbs_g)}${bar("Fat", t.fat, g.fat_g)}
+    ${isCoach ? `<button class="auth-link t-edit" id="edit-targets">Edit targets</button>` : ""}
+  </div>`;
+}
+
 async function renderFood() {
   if (foodSeg === "mine") { await renderFoods(foodSegHtml()); bindFoodSeg(); return; }
   $("#sub").textContent = dayFmt.format(new Date());
-  const { data: meals } = await db.from("meals").select("id,name,servings,nutrients,eaten_at,energy,stomach,food_id")
-    .gte("eaten_at", startOfToday().toISOString()).order("eaten_at", { ascending: false });
+  const [{ data: meals }, { data: goal }] = await Promise.all([
+    db.from("meals").select("id,name,servings,nutrients,eaten_at,energy,stomach,food_id")
+      .gte("eaten_at", startOfToday().toISOString()).order("eaten_at", { ascending: false }),
+    db.from("nutrition_targets").select("kcal,protein_g,carbs_g,fat_g").maybeSingle(),
+  ]);
   const t = sumNutrients((meals ?? []).map((m) => m.nutrients));
   const kcal = r0(t.kcal);
   const share = (g, per) => (kcal ? Math.round((g * per * 100) / kcal) : 0);
@@ -646,10 +668,11 @@ async function renderFood() {
       <button class="btn" id="type">${ICO.type}Type it</button>
     </div>
     <h3>Today, roughly</h3>
-    <div class="card">
+    ${goal ? targetCard(goal, t) : `<div class="card">
       <div class="kcal"><b>${kcal.toLocaleString()}</b><span>calories so far</span></div>
       ${bar("Protein", t.protein, 4)}${bar("Carbs", t.carbs, 4)}${bar("Fat", t.fat, 9)}
-    </div>
+      ${isCoach ? `<button class="btn block" id="set-targets" style="margin-top:14px">Set daily targets</button>` : ""}
+    </div>`}
     <h3>Logged today</h3>
     ${(meals ?? []).length
       ? `<div class="card" style="padding-top:2px;padding-bottom:2px"><ul class="list">${meals.map((m) => `
@@ -660,10 +683,162 @@ async function renderFood() {
           </button></li>`).join("")}</ul></div>`
       : `<p class="empty">Nothing logged yet today.</p>`}`;
   bindFoodSeg();
+  $("#set-targets")?.addEventListener("click", openTargets);
+  $("#edit-targets")?.addEventListener("click", openTargets);
   $("#snap").addEventListener("click", () => $("#camera").click());
   $("#type").addEventListener("click", openTextLog);
   $("#scan").addEventListener("click", openScanner);
   app.querySelectorAll("[data-meal]").forEach((b) => b.addEventListener("click", () => openMeal(b.dataset.meal)));
+}
+
+// ---------------------------------------------------------------------------
+// Calorie & macro targets: Mifflin-St Jeor BMR × activity, adjusted for the goal
+// ---------------------------------------------------------------------------
+const ACTIVITY = [
+  ["sedentary", 1.2, "Mostly sitting", "Desk job, little or no exercise"],
+  ["light", 1.375, "Lightly active", "On your feet some, or 1–3 workouts a week"],
+  ["moderate", 1.55, "Moderately active", "3–5 workouts a week"],
+  ["very", 1.725, "Very active", "Hard training 6–7 days, or a physical job"],
+  ["extra", 1.9, "Extremely active", "Physical job plus hard daily training"],
+];
+const PACES = { lose: [0.25, 0.5, 0.75, 1, 1.5], maintain: [0], gain: [0.25, 0.5] };
+const PROTEIN_PER_LB = [0.7, 0.8, 0.9, 1, 1.1, 1.2];
+const FAT_PCT = [20, 25, 30, 35, 40];
+
+function calcTargets(i) {
+  const kg = i.weight_lb * 0.453592, cm = i.height_in * 2.54;
+  const bmr = 10 * kg + 6.25 * cm - 5 * i.age + (i.sex === "male" ? 5 : -161);
+  const tdee = bmr * (ACTIVITY.find((a) => a[0] === i.activity)?.[1] ?? 1.2);
+  const sign = i.goal === "lose" ? -1 : i.goal === "gain" ? 1 : 0;
+  let kcal = tdee + sign * i.pace_lb_wk * 500;          // ~3,500 kcal per lb, spread over 7 days
+  const floor = i.sex === "male" ? 1500 : 1200;
+  const floored = kcal < floor;
+  kcal = Math.round(Math.max(kcal, floor) / 10) * 10;
+  const protein_g = Math.round(i.weight_lb * i.protein_per_lb);
+  const fat_g = Math.max(Math.round((kcal * i.fat_pct) / 100 / 9), Math.round(i.weight_lb * 0.3));
+  const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
+  return { bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, protein_g, carbs_g, fat_g, floored };
+}
+
+async function openTargets() {
+  const [{ data: cur }, { data: lastW }] = await Promise.all([
+    db.from("nutrition_targets").select("*").maybeSingle(),
+    db.from("weights").select("weight_lb,measured_at").order("measured_at", { ascending: false }).limit(1),
+  ]);
+  const w = lastW?.[0];
+  const f = {
+    sex: cur?.sex ?? "male", age: cur?.age ?? "", height_in: cur?.height_in ?? "",
+    weight_lb: cur?.weight_lb ?? (w ? Number(w.weight_lb) : ""), activity: cur?.activity ?? "moderate",
+    goal: cur?.goal ?? "maintain", pace_lb_wk: Number(cur?.pace_lb_wk ?? 0),
+    protein_per_lb: Number(cur?.protein_per_lb ?? 0.8), fat_pct: Number(cur?.fat_pct ?? 30),
+  };
+  let custom = !!cur?.custom;
+  let manual = cur?.custom ? { kcal: cur.kcal, protein_g: cur.protein_g, carbs_g: cur.carbs_g, fat_g: cur.fat_g } : null;
+  const ft = f.height_in ? Math.floor(f.height_in / 12) : "", inch = f.height_in ? Math.round(f.height_in % 12) : "";
+  const seg = (id, opts, v) => `<div class="seg seg-wide" id="${id}">${opts.map(([k, l]) => `<button type="button" data-v="${k}" aria-pressed="${String(k) === String(v)}">${l}</button>`).join("")}</div>`;
+
+  const body = openSheet(`
+    <h2>Daily targets</h2>
+    <p class="small muted" style="margin-top:-4px">Calories and macros from your stats and goal. You can fine-tune the numbers after.</p>
+    <div class="field"><span>Sex</span>${seg("t-sex", [["male", "Male"], ["female", "Female"]], f.sex)}</div>
+    <div class="grid2">
+      <label class="field"><span>Age</span><input class="input" id="t-age" type="number" inputmode="numeric" min="13" max="100" value="${esc(f.age)}"></label>
+      <label class="field"><span>Weight (lb)</span><input class="input" id="t-w" type="number" inputmode="decimal" step="0.1" value="${esc(f.weight_lb)}"></label>
+    </div>
+    ${w && !cur ? `<p class="small muted" style="margin:-4px 0 6px">Weight is from your last weigh-in.</p>` : ""}
+    <div class="field"><span>Height</span><div class="grid2">
+      <label class="unit"><input class="input" id="t-ft" type="number" inputmode="numeric" min="4" max="7" value="${esc(ft)}"><i>ft</i></label>
+      <label class="unit"><input class="input" id="t-in" type="number" inputmode="numeric" min="0" max="11" value="${esc(inch)}"><i>in</i></label></div></div>
+    <label class="field"><span>Activity</span><select class="input" id="t-act">${ACTIVITY.map(([k, , l, d]) => `<option value="${k}" ${k === f.activity ? "selected" : ""}>${l}: ${d}</option>`).join("")}</select></label>
+    <div class="field"><span>Goal</span>${seg("t-goal", [["lose", "Lose"], ["maintain", "Maintain"], ["gain", "Gain"]], f.goal)}</div>
+    <div class="field" id="t-pace-wrap"><span>Pace</span><div class="chips" id="t-pace"></div></div>
+    <div class="grid2">
+      <label class="field"><span>Protein per lb</span><select class="input" id="t-pro">${PROTEIN_PER_LB.map((v) => `<option value="${v}" ${v === f.protein_per_lb ? "selected" : ""}>${v} g</option>`).join("")}</select></label>
+      <label class="field"><span>Fat</span><select class="input" id="t-fat">${FAT_PCT.map((v) => `<option value="${v}" ${v === f.fat_pct ? "selected" : ""}>${v}% of calories</option>`).join("")}</select></label>
+    </div>
+    <div class="card t-result" id="t-out"></div>
+    <button class="btn primary block" id="t-save">Save targets</button>`);
+
+  const read = () => {
+    f.age = Number($("#t-age", body).value);
+    f.weight_lb = Number($("#t-w", body).value);
+    f.height_in = Number($("#t-ft", body).value) * 12 + Number($("#t-in", body).value || 0);
+    f.activity = $("#t-act", body).value;
+    f.protein_per_lb = Number($("#t-pro", body).value);
+    f.fat_pct = Number($("#t-fat", body).value);
+  };
+  const ready = () => f.age >= 13 && f.weight_lb > 50 && f.height_in >= 48;
+  const drawPace = () => {
+    const opts = PACES[f.goal];
+    if (!opts.includes(f.pace_lb_wk)) f.pace_lb_wk = f.goal === "maintain" ? 0 : 0.5;
+    $("#t-pace-wrap", body).hidden = f.goal === "maintain";
+    $("#t-pace", body).innerHTML = opts.map((v) => `<button type="button" class="chip" data-pace="${v}" aria-pressed="${v === f.pace_lb_wk}">${v} lb/wk</button>`).join("");
+  };
+  const draw = () => {
+    read();
+    const out = $("#t-out", body);
+    if (!ready()) { out.innerHTML = `<p class="small muted" style="margin:0">Fill in age, weight and height to see your numbers.</p>`; return; }
+    const c = calcTargets(f);
+    const n = custom && manual ? manual : c;
+    const mk = (k, label, unit) => custom
+      ? `<label class="t-num"><input class="input" data-m="${k}" type="number" inputmode="numeric" value="${n[k]}"><span>${label}</span></label>`
+      : `<div class="t-num"><b>${n[k].toLocaleString()}${unit}</b><span>${label}</span></div>`;
+    const sum = n.protein_g * 4 + n.carbs_g * 4 + n.fat_g * 9;
+    out.innerHTML = `
+      <p class="small muted" style="margin:0 0 10px">You burn about <b>${c.tdee.toLocaleString()}</b> a day (${c.bmr.toLocaleString()} at rest).${f.goal !== "maintain" ? ` ${f.goal === "lose" ? "Minus" : "Plus"} ${Math.round(f.pace_lb_wk * 500)} for ${f.pace_lb_wk} lb/wk.` : ""}</p>
+      <div class="t-nums">${mk("kcal", "Calories", "")}${mk("protein_g", "Protein", "g")}${mk("carbs_g", "Carbs", "g")}${mk("fat_g", "Fat", "g")}</div>
+      ${c.floored && !custom ? `<p class="small" style="margin:10px 0 0">Held at ${c.kcal.toLocaleString()}, the usual minimum. A slower pace keeps it above that.</p>` : ""}
+      ${custom && Math.abs(sum - n.kcal) > 60 ? `<p class="small muted" style="margin:10px 0 0">Your macros add up to ${Math.round(sum).toLocaleString()} calories.</p>` : ""}
+      <button type="button" class="auth-link t-tune" id="t-tune">${custom ? "Use the calculated numbers" : "Fine-tune the numbers"}</button>`;
+  };
+  body.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const segEl = b.closest(".seg");
+    if (segEl && b.dataset.v) {
+      segEl.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      if (segEl.id === "t-sex") f.sex = b.dataset.v;
+      if (segEl.id === "t-goal") { f.goal = b.dataset.v; drawPace(); }
+      if (!custom) manual = null;
+      return draw();
+    }
+    if (b.dataset.pace) { f.pace_lb_wk = Number(b.dataset.pace); drawPace(); return draw(); }
+    if (b.id === "t-tune") {
+      custom = !custom;
+      if (custom && ready()) { const c = calcTargets(f); manual = { kcal: c.kcal, protein_g: c.protein_g, carbs_g: c.carbs_g, fat_g: c.fat_g }; }
+      return draw();
+    }
+  });
+  body.addEventListener("input", (e) => {
+    const k = e.target.dataset.m;
+    if (k) {
+      manual[k] = Math.max(0, Math.round(Number(e.target.value) || 0));
+      // Changing a macro updates calories so the numbers stay consistent.
+      if (k !== "kcal") { manual.kcal = manual.protein_g * 4 + manual.carbs_g * 4 + manual.fat_g * 9; const kc = $('[data-m="kcal"]', body); if (kc) kc.value = manual.kcal; }
+      return;
+    }
+    draw();
+  });
+  body.addEventListener("change", (e) => { if (e.target.tagName === "SELECT") draw(); });
+  drawPace();
+  draw();
+
+  $("#t-save", body).addEventListener("click", async () => {
+    read();
+    if (!ready()) return toast("Fill in age, weight and height");
+    const c = calcTargets(f);
+    const n = custom && manual ? manual : c;
+    if (!(n.kcal > 0)) return toast("Calories need to be above zero");
+    const { error } = await db.from("nutrition_targets").upsert({
+      user_id: user.id, sex: f.sex, age: f.age, height_in: f.height_in, weight_lb: f.weight_lb, activity: f.activity,
+      goal: f.goal, pace_lb_wk: f.pace_lb_wk, protein_per_lb: f.protein_per_lb, fat_pct: f.fat_pct,
+      kcal: n.kcal, protein_g: n.protein_g, carbs_g: n.carbs_g, fat_g: n.fat_g, custom, updated_at: new Date().toISOString(),
+    });
+    if (error) return toast(error.message);
+    closeSheet();
+    toast("Targets saved");
+    if (tab === "food") renderFood();
+  });
 }
 
 // ---------------------------------------------------------------------------
