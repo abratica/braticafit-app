@@ -491,3 +491,5 @@ body > .c-modal { z-index: 75; }
 .c-save textarea { width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); color: var(--ink); font: 15px/1.4 Inter, sans-serif; resize: vertical; }
 .c-save textarea:focus { outline: none; border-color: var(--accent); }
 .c-save label em { font-style: normal; text-transform: none; letter-spacing: 0; font-family: Inter, sans-serif; }
+.ib-s-acts { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+@media (max-width: 800px) { .ib-s-acts { grid-column: 1 / -1; flex-direction: row; } .ib-s-acts .ib-s-go { flex: 1; } }

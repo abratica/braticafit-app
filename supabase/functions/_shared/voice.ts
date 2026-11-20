@@ -32,15 +32,59 @@ async function pnCatalog() {
 }
 
 const STOP = new Set("the a an and or but to of on in at for with my me i it its is was were be been it's im i'm this that so just really very felt feel feels like did do does didn't dont don't had have has not no yes today yesterday week workout exercise set sets rep reps got get bit kind sort little lot".split(" "));
-const words = (s: string) => (s.toLowerCase().match(/[a-z]+(?:-[a-z]+)?/g) ?? []).filter((w) => w.length > 2 && !STOP.has(w));
+const stem = (w: string) => (w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+const words = (s: string) => (s.toLowerCase().replace(/push[\s-]*ups?/g, "pushup").replace(/pull[\s-]*ups?/g, "pullup").replace(/chin[\s-]*ups?/g, "chinup")
+  .replace(/-/g, " ").match(/[a-z]+/g) ?? []).filter((w) => w.length > 2 && !STOP.has(w)).map(stem);
 const BODY: Record<string, string[]> = {
   knee: ["Squat", "Single-leg"], knees: ["Squat", "Single-leg"], quad: ["Squat", "Single-leg"], quads: ["Squat", "Single-leg"],
   back: ["Hinge", "Core"], spine: ["Hinge", "Core"], hamstring: ["Hinge"], hamstrings: ["Hinge"], glute: ["Hinge", "Single-leg"], glutes: ["Hinge", "Single-leg"],
   hip: ["Hinge", "Warmup & mobility"], hips: ["Hinge", "Warmup & mobility"], shoulder: ["Horizontal push", "Vertical push", "Corrective"],
-  shoulders: ["Horizontal push", "Vertical push", "Corrective"], elbow: ["Arms", "Horizontal pull"], wrist: ["Horizontal push"],
+  shoulders: ["Horizontal push", "Vertical push", "Corrective"], pec: ["Horizontal push"], tricep: ["Arms"], bicep: ["Arms"], elbow: ["Arms", "Horizontal pull"], wrist: ["Horizontal push"],
   chest: ["Horizontal push"], lats: ["Vertical pull"], core: ["Core"], abs: ["Core"], ankle: ["Warmup & mobility", "Squat"], ankles: ["Warmup & mobility", "Squat"],
   mobility: ["Warmup & mobility"], stretch: ["Warmup & mobility"], tight: ["Warmup & mobility"], posture: ["Corrective"],
 };
+
+// Every channel scanned into Browse (public data the coach Library page also reads).
+const COACH_DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
+const EDU_SLUGS = new Set(["e3rehab", "theprehabguys", "squatuniversity", "tommorrison", "jeffnippard"]);
+const HYPE = /\b(and then|shock|shocked|insane|legendary|caught|crazy|gone wrong|prank|reacts?|vs\.?|challenge|vlog|podcast|ep\.? ?\d|episode|live|q&a|giveaway)\b/i;
+type YT = { id: string; title: string; seconds: number; views: number; slug: string; channel: string; tw: string[] };
+let ytCache: { items: YT[]; at: number } | null = null;
+async function browseVideos(): Promise<YT[]> {
+  if (ytCache && Date.now() - ytCache.at < 6 * 3600e3) return ytCache.items;
+  const items: YT[] = [];
+  try {
+    const idx = await fetch(`${COACH_DATA}index.json`).then((r) => r.json());
+    const chans = await Promise.all((idx.channels ?? []).map((c: any) =>
+      fetch(`${COACH_DATA}channels/${c.slug}.json`).then((r) => r.json()).then((j) => ({ ...j, slug: c.slug })).catch(() => null)));
+    for (const ch of chans) {
+      if (!ch) continue;
+      for (const [id, title, seconds, , views] of ch.videos ?? []) {
+        if (!seconds || seconds < 20 || HYPE.test(title) || /\p{Extended_Pictographic}/u.test(title)) continue;
+        items.push({ id, title, seconds, views: views || 0, slug: ch.slug, channel: ch.channel, tw: words(title) });
+      }
+    }
+  } catch (e) { console.error("browse load failed", (e as Error).message); }
+  ytCache = { items, at: Date.now() };
+  return items;
+}
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+export async function rankBrowse(text: string, skip = new Set<string>()) {
+  const msgW = new Set(words(text));
+  return (await browseVideos())
+    .filter((v) => !skip.has(v.id))
+    .map((v) => {
+      const hits = new Set(v.tw.filter((w) => msgW.has(w)));
+      const body = [...hits].some((w) => BODY[w] || BODY[w + "s"]);
+      let sc = hits.size * 3 + (body ? 2 : 0) + (EDU_SLUGS.has(v.slug) ? 1 : 0) + (v.seconds <= 900 ? 1 : 0) + Math.min(2, Math.log10(1 + v.views) / 3);
+      if (hits.size < 2 && !(hits.size === 1 && body)) sc = 0;
+      return { v, sc };
+    })
+    .filter((x) => x.sc > 0)
+    .sort((a, b) => b.sc - a.sc)
+    .slice(0, 15);
+}
 
 type Cand = { ref: string; line: string; score: number; cues?: string; out: Record<string, unknown> };
 
@@ -88,8 +132,21 @@ async function candidates(text: string, recentNames: string[]): Promise<Cand[]> 
       },
     });
   });
+  // Browse: titles that share the most words with the message. A title needs 2+ shared words (or 1 plus a body part).
+  const yt = await rankBrowse(text, new Set(lib.map((d) => d.video_id)));
+  yt.forEach(({ v, sc }, i) => {
+    const kind = EDU_SLUGS.has(v.slug) ? "education" : v.seconds > 180 ? "workout" : "exercise";
+    out.push({
+      ref: `Y${i}`, score: sc,
+      line: `Y${i} | ${v.title} | ${kind} | ${v.channel} | ${mmss(v.seconds)} long | in Browse, not in coach's Library`,
+      out: { video_id: v.id, name: v.title.replace(/\s*[|#].*$/, "").trim().slice(0, 90), title: v.title, thumb: null, source: "browse",
+             kind, channel: v.channel, slug: v.slug, seconds: v.seconds },
+    });
+  });
+
   // Keep the prompt small: everything that overlaps the message or recent training, then a few of the Library.
   const ranked = out.filter((c) => c.score > 0).sort((a, b) => b.score - a.score).slice(0, 70);
+  for (const c of out) if (c.ref.startsWith("Y") && !ranked.includes(c)) ranked.push(c);
   if (ranked.length < 25) for (const c of out.filter((c) => c.ref.startsWith("L") && !ranked.includes(c)).slice(0, 25 - ranked.length)) ranked.push(c);
   // Every Education video the coach has noted goes in, so "why does this feel..." questions can find one.
   for (const c of out) if (!ranked.includes(c) && c.out.kind === "education" && c.line.includes("helps with")) ranked.push(c);
@@ -130,7 +187,8 @@ export async function groqJson(system: string, user: string): Promise<any> {
 
 export const SYSTEM = `You help a personal trainer answer a client's message. Pick up to 3 videos from the catalog that the trainer could send back to genuinely help with what the client said: an education video that explains why something feels the way it does, a demo whose coaching cue fixes the problem, an easier or joint-friendlier swap if something hurt, or a mobility drill for tightness.
 Rules:
-- Only use refs that appear in the catalog. Prefer videos from the coach's Library (L refs) when they fit equally well.
+- Only use refs that appear in the catalog. Pick the best video for the problem from any source: the coach's Library (L), Precision Nutrition demos (P), or YouTube videos in Browse (Y). When two fit equally well, prefer the Library.
+- Prefer short, focused videos over long general ones; judge a Browse video by its title and length.
 - When the client says where they feel an exercise, that something feels off, or that something hurts, include an education video if one clearly fits (the coach's "helps with" note is the strongest signal), and pair it with a cue or swap rather than just the same exercise again.
 - Only suggest the exact exercise they mentioned if its cues address their problem, and then say which cue in "why".
 - If the message is small talk, scheduling, food, or anything a video wouldn't help with, return no items.

@@ -1,5 +1,5 @@
 // CI check that the Groq key, the Whisper model and the suggestion model all work.
-import { transcribe, groqJson, SYSTEM, chatModel } from "../supabase/functions/_shared/voice.ts";
+import { transcribe, groqJson, SYSTEM, chatModel, rankBrowse } from "../supabase/functions/_shared/voice.ts";
 
 const wav = await Deno.readFile(Deno.args[0]);
 const text = await transcribe(new Blob([wav], { type: "audio/wav" }), "check.wav");
@@ -24,3 +24,11 @@ console.log("SMALL TALK:", JSON.stringify(small));
 const shoulder = await groqJson(SYSTEM, `Client's latest message:\n"""I feel push ups mostly in my shoulders, not my chest"""\n\nCatalog (ref | name | type | equipment | movement | notes):\n${catalog}`);
 console.log("SHOULDERS:", JSON.stringify(shoulder));
 if (!shoulder.items?.some((i: any) => i.ref === "L1")) throw new Error("education video not picked for the shoulder question");
+
+// Real Browse data: Andrew's message from his test, no Library help.
+const msg = "i was doing push ups and only feeling it my front shoulders and not my chest";
+const yt = await rankBrowse(msg);
+console.log("BROWSE TOP:\n" + yt.map(({ v, sc }) => `  ${sc.toFixed(1)}  ${v.channel} | ${v.title} | ${Math.round(v.seconds / 60)} min`).join("\n"));
+const lines = yt.map(({ v }, i) => `Y${i} | ${v.title} | ${v.channel} | ${Math.floor(v.seconds / 60)}:${String(v.seconds % 60).padStart(2, "0")} long | in Browse, not in coach's Library`);
+const real = await groqJson(SYSTEM, `Client's latest message:\n"""${msg}"""\n\nCatalog (ref | name | type | equipment | movement | notes):\n${catalog.split("\n").filter((l) => !l.startsWith("L1")).join("\n")}\n${lines.join("\n")}`);
+console.log("REAL PICK:", JSON.stringify(real.items?.map((i: any) => ({ ...i, title: i.ref.startsWith("Y") ? yt[Number(i.ref.slice(1))]?.v.title : i.ref }))));

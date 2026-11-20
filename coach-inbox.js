@@ -17,7 +17,7 @@ const shortStamp = (iso) => {
 };
 
 export function createInbox(ctx) {
-  const { db, esc, toast, SVG, IC, st, root, api, thumbOf, openPlayer, loadPN } = ctx;
+  const { db, esc, toast, SVG, IC, st, root, api, thumbOf, openPlayer, loadPN, loadChannel } = ctx;
   const ib = (st.inbox ??= { threads: [], open: null, msgs: [], urls: {}, attach: null, clip: null, rec: null, sig: "", draft: "" });
 
   // ---------- data ----------
@@ -77,9 +77,10 @@ export function createInbox(ctx) {
     const sugg = !coach && (m.suggestions || []).length ? `
       <div class="ib-sugg"><p class="ib-sugg-h">${SVG(IC.star, 14)} Suggested videos <span>only you see these</span></p>
         ${m.suggestions.map((s, i) => `<div class="ib-s">
-          <button class="ib-s-th" data-ib-watch="${esc(s.video_id)}" style="background-image:url('${esc(s.thumb || thumbOf(s.video_id))}')" aria-label="Watch ${esc(s.name)}">${SVG(IC.play, 14)}</button>
-          <div class="ib-s-txt"><b>${esc(s.name)}</b><span>${esc(s.why || "")}</span><em>${s.kind === "education" ? "Education · " : ""}${s.source === "library" ? "Your Library" : "Precision Nutrition"}${s.start_sec ? ` · from ${mmss(s.start_sec)}` : ""}</em></div>
-          <button class="btn ghost ib-s-go" data-ib-attach="${m.id}:${i}">Attach</button></div>`).join("")}
+          <button class="ib-s-th" data-ib-watch="${esc(s.video_id)}" data-slug="${esc(s.slug || "")}" style="background-image:url('${esc(s.thumb || thumbOf(s.video_id))}')" aria-label="Watch ${esc(s.name)}">${SVG(IC.play, 14)}</button>
+          <div class="ib-s-txt"><b>${esc(s.name)}</b><span>${esc(s.why || "")}</span><em>${s.kind === "education" ? "Education · " : ""}${s.source === "library" ? "Your Library" : s.source === "browse" ? `${esc(s.channel || "Browse")} · not in your Library` : "Precision Nutrition"}${s.seconds ? ` · ${mmss(s.seconds)}` : ""}${s.start_sec ? ` · from ${mmss(s.start_sec)}` : ""}</em></div>
+          <div class="ib-s-acts"><button class="btn ghost ib-s-go" data-ib-attach="${m.id}:${i}">Attach</button>
+            ${s.source === "browse" && !st.demos.some((d) => d.video_id === s.video_id) ? `<button class="c-link" data-ib-watch="${esc(s.video_id)}" data-slug="${esc(s.slug || "")}">+ Library</button>` : ""}</div></div>`).join("")}
       </div>` : "";
     return `<div class="ib-b ${coach ? "me" : "them"}">
       <div class="ib-bb">${m.body ? `<p class="ib-text">${esc(m.body)}</p>` : ""}${audio}${tx}${vid}</div>
@@ -278,7 +279,10 @@ export function createInbox(ctx) {
       paint(); return true;
     }
     if (t.hasAttribute("data-ib-back")) { ib.open = null; paint({ thread: true }); return true; }
-    if (t.dataset.ibWatch) { await loadPN(); openPlayer(t.dataset.ibWatch); return true; }
+    if (t.dataset.ibWatch) {
+      if (t.dataset.slug) { try { await loadChannel(t.dataset.slug); } catch {} } else await loadPN();
+      openPlayer(t.dataset.ibWatch); return true;
+    }
     if (t.dataset.ibAttach) {
       const [mid, i] = t.dataset.ibAttach.split(":");
       const s = ib.msgs.find((m) => m.id === mid)?.suggestions?.[Number(i)];

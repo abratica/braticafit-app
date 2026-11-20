@@ -751,7 +751,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
   }
 
   const train = createTrain({ db, esc, toast, SVG, IC, st, root, render, ago, user });
-  const inbox = createInbox({ db, esc, toast, SVG, IC, st, root, api, thumbOf, openPlayer, loadPN });
+  const inbox = createInbox({ db, esc, toast, SVG, IC, st, root, api, thumbOf, openPlayer, loadPN, loadChannel });
   root.innerHTML = shell(`<p class="c-empty-line">Loading…</p>`);
   await Promise.all([loadIndex(), loadDemos(), loadMembers(), inbox.unreadNow()]);
   await render();
