@@ -447,8 +447,8 @@ function openPlanner() {
     </div>
     <div id="pw" hidden>
       <label class="field"><span>Exercises, one per line</span><textarea class="input" id="px" rows="6"
-        placeholder="Goblet squat, 3x10, 50, rest 90&#10;A1 Bench press, 3x8, 135&#10;A2 Chest-supported row, 3x10, 40, rest 120&#10;Side plank, 3x30 sec"></textarea></label>
-      <p class="small muted" style="margin-top:-4px">Name, sets x reps, weight. Optional: rest 60 (seconds) and a YouTube link for a demo. Superset: start the lines with A1, A2 (B1, B2…).</p>
+        placeholder="Goblet squat, 3x10, 50, rest 90&#10;A1 Bench press, 3x8, 135&#10;A2 Chest-supported row, 3x10, 40, rest 120&#10;Side plank, 3x30 sec&#10;Intervals 40/20 x8: Jumping jacks, Mountain climbers"></textarea></label>
+      <p class="small muted" style="margin-top:-4px">Name, sets x reps, weight. Optional: rest 60 (seconds) and a YouTube link for a demo. Superset: start the lines with A1, A2 (B1, B2…). Intervals: "Intervals 40/20 x8:" then the moves (seconds on / off × rounds).</p>
     </div>
     <label class="field"><span>Minutes <span class="muted">(optional)</span></span><input class="input" id="pm" type="number" inputmode="numeric"></label>
     <label class="field"><span>Note <span class="muted">(optional)</span></span><input class="input" id="pn" placeholder="Slow 3-second lower on the squats"></label>
@@ -492,6 +492,18 @@ function openPlanner() {
 
 function parseExercises(text) {
   return text.split("\n").map((line) => line.trim()).filter(Boolean).map((raw) => {
+    // "Intervals 40/20 x8: Jumping jacks, Mountain climbers" -> an interval block
+    const iv = raw.match(/^([^:]*?)\s*(\d+)\s*\/\s*(\d+)\s*[x×]\s*(\d+)\s*:?\s*(.*)$/i);
+    if (iv && /interval|tabata|circuit|hiit|finisher/i.test(iv[1] || "interval")) {
+      const moves = iv[5].split(",").map((m) => m.trim()).filter(Boolean);
+      const work = Math.min(600, Number(iv[2])), restS = Math.min(600, Number(iv[3])), rounds = Math.min(50, Number(iv[4]));
+      return {
+        name: (iv[1] || "Intervals").trim() || "Intervals",
+        scheme: `${rounds} rounds · ${work}s on / ${restS}s off`,
+        interval: { work, rest: restS, rounds, moves: moves.length ? moves : ["Work"] },
+        sets: [{ reps: "", weight: "", done: false }],
+      };
+    }
     // "A1 Bench press, ..." -> superset A
     const ss = raw.match(/^([A-Za-z])\d\s*[.):-]?\s+(.+)$/);
     const line = ss ? ss[2] : raw;
@@ -539,6 +551,16 @@ async function openSession(id) {
   }
   const restOf = (x) => (x.rest_sec ?? REST_DEFAULT);
   const exInner = (x, i) => {
+    if (x.interval) {
+      const v = x.interval, done = !!x.sets?.[0]?.done;
+      const total = v.rounds * v.work + (v.rounds - 1) * v.rest;
+      return `
+      <div class="ex-head"><div class="main"><div class="name">${esc(x.name)}</div>
+        <div class="small muted">${v.rounds} rounds · ${v.work}s on / ${v.rest}s off · ${fmtClock(total)} total</div></div></div>
+      <div class="iv-moves">${v.moves.map((m) => `<span>${esc(m)}</span>`).join("")}</div>
+      ${done ? `<div class="done-line" style="margin-top:12px">${ICO.check}<span>Done</span></div>` : ""}
+      <button class="btn ${done ? "ghost" : "primary"} block" data-iv="${i}" style="margin-top:12px">${ICO.play}${done ? "Do it again" : "Start intervals"}</button>`;
+    }
     const prev = last[x.name.toLowerCase()];
     const sub = [x.scheme, !x.superset || isLastInSuperset(list, x) ? `rest ${fmtRest(restOf(x))}` : "no rest, go to next"].filter(Boolean).join(" · ");
     return `
@@ -609,6 +631,15 @@ async function openSession(id) {
       save(i);
     });
     card.addEventListener("click", (e) => {
+      const ivb = e.target.closest("[data-iv]");
+      if (ivb) {
+        stopRest();
+        return runIntervals(list[i], () => {
+          list[i].sets = [{ reps: "", weight: "", done: true }];
+          save(i);
+          setTimeout(() => openSession(w.id), 500);
+        });
+      }
       const b = e.target.closest("[data-done]");
       if (!b) return;
       const j = Number(b.closest("[data-set]").dataset.set);
@@ -746,6 +777,102 @@ function stopRest() {
   clearInterval(rest.tick);
   const bar = $("#restbar");
   if (bar) { bar.hidden = true; bar.classList.remove("go"); }
+}
+
+// ---------------------------------------------------------------------------
+// Interval timer: full screen, 10 s get-ready, then work / rest for each round
+// ---------------------------------------------------------------------------
+const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, sec) % 60).padStart(2, "0")}`;
+
+async function runIntervals(x, onDone) {
+  const v = x.interval;
+  // The phases in order: get ready, then work/rest per round (no rest after the last round).
+  const phases = [{ kind: "prep", sec: 10, move: v.moves[0], round: 1 }];
+  for (let r = 1; r <= v.rounds; r++) {
+    phases.push({ kind: "work", sec: v.work, move: v.moves[(r - 1) % v.moves.length], round: r });
+    if (r < v.rounds && v.rest > 0) phases.push({ kind: "rest", sec: v.rest, move: v.moves[r % v.moves.length], round: r + 1 });
+  }
+  try { rest.audio ??= new (window.AudioContext || window.webkitAudioContext)(); rest.audio.resume(); } catch {}
+  let lock = null;
+  try { lock = await navigator.wakeLock?.request("screen"); } catch {}
+
+  const el = document.createElement("div");
+  el.id = "iv";
+  el.innerHTML = `
+    <button class="iv-x" data-ivc="end" aria-label="End intervals">✕</button>
+    <div class="iv-phase"></div>
+    <div class="iv-time"></div>
+    <div class="iv-move"></div>
+    <div class="iv-round"></div>
+    <div class="iv-bar"><div></div></div>
+    <div class="iv-ctl"><button data-ivc="pause">Pause</button><button data-ivc="skip">Skip ›</button></div>`;
+  document.body.appendChild(el);
+  document.body.style.overflow = "hidden";
+
+  let idx = 0, end = Date.now() + phases[0].sec * 1000, paused = null, lastBeep = null, tick = null;
+  const beep = (freq = 880, len = 0.12) => {
+    try {
+      const ctx = rest.audio; if (!ctx) return;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = freq; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + len);
+      o.start(); o.stop(ctx.currentTime + len + 0.02);
+    } catch {}
+  };
+  const finish = (completed) => {
+    clearInterval(tick);
+    try { lock?.release(); } catch {}
+    if (completed) {
+      el.className = "done";
+      el.innerHTML = `<div class="iv-phase">Done</div><div class="iv-time">${v.rounds}</div><div class="iv-move">rounds finished</div>
+        <div class="iv-ctl"><button data-ivc="close" class="solid">Back to workout</button></div>`;
+      beep(988, 0.5);
+      try { navigator.vibrate?.([300, 120, 300]); } catch {}
+      onDone();
+    } else close();
+  };
+  const close = () => { el.remove(); document.body.style.overflow = ""; };
+  const go = (i) => {
+    idx = i;
+    if (idx >= phases.length) return finish(true);
+    end = Date.now() + phases[idx].sec * 1000;
+    lastBeep = null;
+    beep(phases[idx].kind === "work" ? 1175 : 660, 0.35);
+    try { navigator.vibrate?.(phases[idx].kind === "work" ? 250 : 120); } catch {}
+    draw();
+  };
+  const draw = () => {
+    const p = phases[idx];
+    const left = paused ?? Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    el.className = p.kind + (paused != null ? " paused" : "");
+    $(".iv-phase", el).textContent = paused != null ? "Paused" : p.kind === "work" ? "Work" : p.kind === "rest" ? "Rest" : "Get ready";
+    $(".iv-time", el).textContent = fmtClock(left);
+    $(".iv-move", el).textContent = p.kind === "work" ? p.move : `Next: ${p.move}`;
+    $(".iv-round", el).textContent = `Round ${p.round} of ${v.rounds}`;
+    $(".iv-bar div", el).style.width = `${(1 - left / p.sec) * 100}%`;
+    $('[data-ivc="pause"]', el).textContent = paused != null ? "Resume" : "Pause";
+    if (paused == null) {
+      if (left <= 3 && left > 0 && lastBeep !== left) { lastBeep = left; beep(880, 0.1); }
+      if (left === 0) go(idx + 1);
+    }
+  };
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ivc]");
+    if (!b) return;
+    const c = b.dataset.ivc;
+    if (c === "close") return close();
+    if (c === "end") return finish(false);
+    if (c === "skip") { paused = null; return go(idx + 1); }
+    if (c === "pause") {
+      if (paused == null) paused = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      else { end = Date.now() + paused * 1000; paused = null; }
+      draw();
+    }
+  });
+  tick = setInterval(draw, 200);
+  draw();
 }
 
 // Two-tap delete without a browser dialog
