@@ -245,11 +245,82 @@ function ytId(s) {
   return /^[\w-]{11}$/.test(String(s).trim()) ? String(s).trim() : null;
 }
 const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
-const embedSrc = (id, start = 0) => (isVm(id)
-  ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0${start ? `#t=${start}s` : ""}`
-  : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1${start ? `&start=${start}` : ""}`);
+const embedSrc = (id, start = 0, autoplay = false) => (isVm(id)
+  ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0${autoplay ? "&autoplay=1" : ""}${start ? `#t=${start}s` : ""}`
+  : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1${autoplay ? "&autoplay=1" : ""}${start ? `&start=${start}` : ""}`);
 const player = (id, start = 0) => `<div class="player"><iframe src="${embedSrc(id, start)}"
   title="Workout video" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
+
+// ---------------------------------------------------------------------------
+// Full-screen video viewer for exercise demos and videos from the coach.
+// Closes with ✕, a swipe down, Escape, or the phone's back gesture, and always stops the video.
+// ---------------------------------------------------------------------------
+let pnInfo = null;
+async function pnLookup(id) {
+  if (!String(id).startsWith("vm:")) return null;
+  if (!pnInfo) {
+    pnInfo = fetch("data/pn.json").then((r) => r.json()).then((j) => {
+      const m = new Map();
+      for (const e of j.items || []) for (const v of ["men", "women"]) if (e[v]) m.set("vm:" + e[v], e);
+      return m;
+    }).catch(() => new Map());
+  }
+  return (await pnInfo).get(id) || null;
+}
+let viewerOpen = false, viewerPushed = false;
+function openViewer(id, { title = "", start = 0 } = {}) {
+  let v = $("#viewer");
+  if (!v) {
+    v = document.createElement("div");
+    v.id = "viewer";
+    v.setAttribute("role", "dialog");
+    v.setAttribute("aria-modal", "true");
+    document.body.appendChild(v);
+    v.addEventListener("click", (e) => { if (e.target.closest("[data-vclose]")) closeViewer(); });
+    // Swipe down anywhere outside the video itself to close.
+    let y0 = null, dy = 0;
+    v.addEventListener("touchstart", (e) => { if (e.target.closest(".viewer-info") && v.querySelector(".viewer-info").scrollTop > 0) return; y0 = e.touches[0].clientY; dy = 0; }, { passive: true });
+    v.addEventListener("touchmove", (e) => {
+      if (y0 == null) return;
+      dy = Math.max(0, e.touches[0].clientY - y0);
+      v.style.transform = `translateY(${dy}px)`; v.style.opacity = String(Math.max(0.4, 1 - dy / 500));
+    }, { passive: true });
+    v.addEventListener("touchend", () => {
+      if (y0 == null) return;
+      y0 = null;
+      if (dy > 110) closeViewer();
+      else { v.style.transform = ""; v.style.opacity = ""; }
+    });
+  }
+  v.innerHTML = `
+    <div class="viewer-top"><span class="viewer-grip"></span><b>${esc(title)}</b><button class="viewer-x" data-vclose aria-label="Close"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="viewer-video"><div class="player"><iframe src="${embedSrc(id, start, true)}" title="${esc(title)}"
+      allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div></div>
+    <div class="viewer-info"></div>`;
+  v.style.transform = ""; v.style.opacity = "";
+  v.hidden = false;
+  viewerOpen = true;
+  document.body.style.overflow = "hidden";
+  if (!viewerPushed) { history.pushState({ bfViewer: true }, ""); viewerPushed = true; }
+  pnLookup(id).then((e) => {
+    if (!e || !viewerOpen) return;
+    const steps = String(e.cues || "").split(/\s*\d+\.\s+/).map((x) => x.trim()).filter(Boolean);
+    const info = $("#viewer .viewer-info");
+    if (info && steps.length) info.innerHTML = `<h3>How to do it</h3><ol class="viewer-cues">${steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>`;
+  });
+}
+function closeViewer(fromBack = false) {
+  const v = $("#viewer");
+  if (!v || !viewerOpen) return;
+  viewerOpen = false;
+  v.querySelectorAll("iframe").forEach((f) => f.remove());
+  v.hidden = true;
+  v.innerHTML = "";
+  if ($("#sheet").hidden) document.body.style.overflow = "";
+  if (viewerPushed) { viewerPushed = false; if (!fromBack) history.back(); }
+}
+window.addEventListener("popstate", () => { if (viewerOpen) closeViewer(true); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && viewerOpen) closeViewer(); });
 
 const ICO = {
   search: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>`,
@@ -581,7 +652,7 @@ async function openSession(id) {
     const sub = [x.scheme, !x.superset || isLastInSuperset(list, x) ? `rest ${fmtRest(restOf(x))}` : "no rest, go to next"].filter(Boolean).join(" · ");
     return `
       <div class="ex-head">
-        ${x.demo_video_id ? `<button class="ex-demo" data-demo="${x.demo_video_id}" style="background-image:url('${ytThumb(x.demo_video_id)}')" aria-label="Watch the ${esc(x.name)} demo"><span class="play sm">${ICO.play}</span></button>` : ""}
+        ${x.demo_video_id ? `<button class="ex-demo" data-demo="${x.demo_video_id}" data-name="${esc(x.name)}" style="background-image:url('${ytThumb(x.demo_video_id)}')" aria-label="Watch the ${esc(x.name)} demo"><span class="play sm">${ICO.play}</span></button>` : ""}
         <div class="main"><div class="name">${ssLabel[x.id] ? `<span class="ss-tag">${ssLabel[x.id]}</span>` : ""}${esc(x.name)}</div><div class="small muted">${esc(sub)}</div></div>
       </div>
       ${prev ? `<div class="last-time">Last time · ${shortFmt.format(fromYmd(prev.day))}: <b>${esc(prev.summary)}</b></div>` : ""}
@@ -629,7 +700,7 @@ async function openSession(id) {
     ${isCoach || !w.assigned ? `<button class="btn danger block" id="del-w" style="margin-top:10px">Delete workout</button>` : ""}`;
 
   $("#back").addEventListener("click", () => { stopRest(); go(back); });
-  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>Demo</h2>${player(b.dataset.demo)}`)));
+  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openViewer(b.dataset.demo, { title: b.dataset.name || "Demo" })));
 
   const timers = {};
   const save = (i) => {
@@ -1388,7 +1459,7 @@ function msgBubble(m, urls) {
   const audio = m.audio_path ? `<audio controls preload="metadata" src="${esc(urls[m.audio_path] || "")}"></audio>` : "";
   const tx = m.audio_path ? (m.transcript ? `<p class="tx">${esc(m.transcript)}</p>`
     : m.transcript_status === "pending" ? `<p class="tx muted">Transcribing…</p>` : "") : "";
-  const vid = m.video_id ? `<button class="msg-video" data-demo="${esc(m.video_id)}" data-start="${m.video_start || 0}" style="background-image:url('${esc(m.video_thumb || ytThumb(m.video_id))}')" aria-label="Play ${esc(m.video_title || "video")}">
+  const vid = m.video_id ? `<button class="msg-video" data-demo="${esc(m.video_id)}" data-start="${m.video_start || 0}" data-title="${esc(m.video_title || "Video")}" style="background-image:url('${esc(m.video_thumb || ytThumb(m.video_id))}')" aria-label="Play ${esc(m.video_title || "video")}">
       <span class="play sm">${ICO.play}</span></button><b class="msg-vt">${esc(m.video_title || "Video")}${m.video_start ? ` <span class="muted small">· starts at ${mmss(m.video_start)}</span>` : ""}</b>` : "";
   const body = m.body ? `<div class="msg-text">${esc(m.body)}</div>` : "";
   return `<div class="bubble ${mine ? "me" : "them"}${m.audio_path ? " voice" : ""}" data-mid="${m.id}"><div>${body}${audio}${tx}${vid}</div>
@@ -1442,7 +1513,7 @@ async function renderCoach() {
   };
   setBtn();
   $("#msg").addEventListener("input", setBtn);
-  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>${esc(b.nextElementSibling?.textContent || "Video")}</h2>${player(b.dataset.demo, Number(b.dataset.start) || 0)}`)));
+  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openViewer(b.dataset.demo, { title: b.dataset.title || "Video", start: Number(b.dataset.start) || 0 })));
 
   const after = (id) => api("message_sent", { message_id: id }).catch(() => {}).then(() => { if (tab === "coach" && !recNow) renderCoach(); });
   $("#cmp").addEventListener("submit", async (e) => {
