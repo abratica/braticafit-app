@@ -2,6 +2,7 @@
 // so client devices never download this file in normal use.
 
 import { createTrain } from "./coach-train.js?v=4";
+import { createInbox } from "./coach-inbox.js?v=1";
 
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
 const PAGE = 60;
@@ -91,12 +92,14 @@ const IC = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
 };
 
 export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=7"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=8"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -104,8 +107,10 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
   root.id = "coach-root";
   document.body.appendChild(root);
 
+  const [view0, openId] = String(view || "").split(".");
   const st = {
-    view: ["dashboard", "library", "clients", "programs", "inbox", "calls"].includes(view) ? view : "dashboard", channels: [], data: {}, demos: [], pn: null, thumbs: {}, members: [], requests: [], confirmRm: null, mail: null,
+    inbox: openId ? { threads: [], open: openId, msgs: [], urls: {}, attach: null, clip: null, rec: null, sig: "", draft: "" } : undefined, unread: 0,
+    view: ["dashboard", "library", "clients", "programs", "inbox", "calls"].includes(view0) ? view0 : "dashboard", channels: [], data: {}, demos: [], pn: null, thumbs: {}, members: [], requests: [], confirmRm: null, mail: null,
     client: null, prog: null, progList: [],
     lib: { tab: "library", src: "pn", channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE,
       kind: "all", eq: "all", pattern: "all", version: "all", showIn: true, lq: "", lkind: "all", leq: "all" },
@@ -141,7 +146,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
         <img class="c-wordmark" src="icons/wordmark.webp" alt="BraticaFit">
         <nav class="c-nav" aria-label="Coach">
           ${nav.map(([k, label, ic]) => `<button data-nav="${k}" ${st.view === k || (k === "clients" && st.view === "client") ? 'aria-current="page"' : ""}>${SVG(IC[ic])}<span>${label}</span>
-            ${k === "library" && st.demos.length ? `<i class="c-badge">${st.demos.length}</i>` : ""}${k === "clients" && st.requests.length ? `<i class="c-badge hot">${st.requests.length}</i>` : ""}</button>`).join("")}
+            ${k === "library" && st.demos.length ? `<i class="c-badge">${st.demos.length}</i>` : ""}${k === "clients" && st.requests.length ? `<i class="c-badge hot">${st.requests.length}</i>` : ""}${k === "inbox" && st.unread ? `<i class="c-badge hot">${st.unread}</i>` : ""}</button>`).join("")}
         </nav>
         <div class="c-side-foot">
           <div class="c-mode" role="group" aria-label="Mode"><button aria-pressed="true">Coach</button><button aria-pressed="false" data-exit>Me</button></div>
@@ -158,16 +163,19 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     else if (st.view === "clients") root.innerHTML = shell(await clients());
     else if (st.view === "client" && st.client) root.innerHTML = shell(await train.clientView());
     else if (st.view === "programs") root.innerHTML = shell(await train.programsView());
+    else if (st.view === "inbox") root.innerHTML = shell(await inbox.view());
     else root.innerHTML = shell(soon());
     root.scrollTop = 0;
+    const msgs = root.querySelector("#ib-msgs");
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
   }
 
   function soon() {
-    const what = { inbox: ["Inbox", "Voice notes from clients, tagged by exercise and set, with your replies."],
+    const what = {
       calls: ["Calls", "Scheduled video calls with reminders and Join inside the app."] }[st.view];
     return `<header class="c-head"><div><p class="c-eyebrow">Next up</p><h1>${what[0]}</h1></div></header>
-      <section class="c-card c-empty"><p>${what[1]}</p><p class="muted">This part isn't built yet. Clients, Programs and the Library are live.</p>
-      <button class="btn primary" data-nav="library">${SVG(IC.library, 18)}Go to the Library</button></section>`;
+      <section class="c-card c-empty"><p>${what[1]}</p><p class="muted">This part isn't built yet.</p>
+      <button class="btn primary" data-nav="inbox">${SVG(IC.inbox, 18)}Go to the Inbox</button></section>`;
   }
 
   // ---------- clients ----------
@@ -572,6 +580,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     const t = e.target.closest("button, [data-close]");
     if (!t) return;
     if (t.dataset.close !== undefined) return closePlayer();
+    if (await inbox.onClick(t)) return;
     if (t.hasAttribute("data-exit")) return close();
     if (t.dataset.nav) {
       st.view = t.dataset.nav; if (st.view === "programs") st.prog = null;
@@ -704,13 +713,15 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
 
   function close() {
     document.removeEventListener("keydown", onKey);
+    inbox.stop();
     root.remove();
     document.body.classList.remove("coach-on");
     exit();
   }
 
   const train = createTrain({ db, esc, toast, SVG, IC, st, root, render, ago, user });
+  const inbox = createInbox({ db, esc, toast, SVG, IC, st, root, api, thumbOf, openPlayer, loadPN });
   root.innerHTML = shell(`<p class="c-empty-line">Loading…</p>`);
-  await Promise.all([loadIndex(), loadDemos(), loadMembers()]);
+  await Promise.all([loadIndex(), loadDemos(), loadMembers(), inbox.unreadNow()]);
   await render();
 }

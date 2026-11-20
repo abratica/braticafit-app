@@ -1344,17 +1344,73 @@ async function renderProgress() {
 }
 
 // ---------------------------------------------------------------------------
-// Coach: next call and messages
+// Coach: next call and messages (text + voice notes, videos the coach sends)
 // ---------------------------------------------------------------------------
+const REC_MAX = 180;
+function recMime() {
+  for (const t of ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/aac"]) if (window.MediaRecorder?.isTypeSupported?.(t)) return t;
+  return "";
+}
+const canRecord = () => !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+async function startRecorder(onTick) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mime = recMime();
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const t0 = Date.now();
+  let done;
+  const finished = new Promise((r) => (done = r));
+  rec.onstop = () => { stream.getTracks().forEach((t) => t.stop()); done(); };
+  rec.start(250);
+  const timer = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    onTick?.(s);
+  }, 250);
+  const ctl = {
+    async stop() {
+      clearInterval(timer);
+      if (rec.state !== "inactive") rec.stop();
+      await finished;
+      const type = (rec.mimeType || mime || "audio/webm").split(";")[0];
+      return { blob: new Blob(chunks, { type }), sec: Math.max(1, Math.round((Date.now() - t0) / 1000)), type, ext: type.includes("mp4") || type.includes("aac") ? "m4a" : "webm" };
+    },
+    cancel() { clearInterval(timer); if (rec.state !== "inactive") rec.stop(); },
+  };
+  return ctl;
+}
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+function msgBubble(m, urls) {
+  const mine = !m.from_coach;
+  const audio = m.audio_path ? `<audio controls preload="metadata" src="${esc(urls[m.audio_path] || "")}"></audio>` : "";
+  const tx = m.audio_path ? (m.transcript ? `<p class="tx">${esc(m.transcript)}</p>`
+    : m.transcript_status === "pending" ? `<p class="tx muted">Transcribing…</p>` : "") : "";
+  const vid = m.video_id ? `<button class="msg-video" data-demo="${esc(m.video_id)}" style="background-image:url('${esc(m.video_thumb || ytThumb(m.video_id))}')" aria-label="Play ${esc(m.video_title || "video")}">
+      <span class="play sm">${ICO.play}</span></button><b class="msg-vt">${esc(m.video_title || "Video")}</b>` : "";
+  const body = m.body ? `<div class="msg-text">${esc(m.body)}</div>` : "";
+  return `<div class="bubble ${mine ? "me" : "them"}${m.audio_path ? " voice" : ""}" data-mid="${m.id}"><div>${body}${audio}${tx}${vid}</div>
+    <span>${mine ? "" : "Coach · "}${when(m.created_at)}</span></div>`;
+}
+
+let msgPoll = null, recNow = null;
 async function renderCoach() {
   $("#sub").textContent = "Your coach";
   const [{ data: calls }, { data: msgs }] = await Promise.all([
     db.from("calls").select("*").gte("starts_at", new Date(Date.now() - 3600e3).toISOString()).order("starts_at").limit(1),
     db.from("messages").select("*").order("created_at").limit(300),
   ]);
+  if (tab !== "coach") return;
   const call = (calls ?? [])[0];
   const list = msgs ?? [];
   const live = call && Date.now() >= new Date(call.starts_at).getTime() - 10 * 60e3;
+  const paths = list.filter((m) => m.audio_path).map((m) => m.audio_path);
+  const urls = {};
+  if (paths.length) {
+    const { data } = await db.storage.from("voice").createSignedUrls(paths, 3600);
+    for (const u of data ?? []) if (u.signedUrl) urls[u.path] = u.signedUrl;
+  }
+  const draft = $("#msg")?.value ?? "";
 
   app.innerHTML = `
     <div class="card call">
@@ -1367,28 +1423,85 @@ async function renderCoach() {
     ${call?.join_url ? `<a class="btn ${live ? "primary" : ""} block" href="${esc(call.join_url)}" target="_blank" rel="noopener" style="margin-top:8px;text-decoration:none">${ICO.video}Join call</a>` : ""}
     <h3>Messages</h3>
     <div class="bubbles" id="bubbles">
-      ${list.length ? list.map((m) => `<div class="bubble ${m.from_coach ? "them" : "me"}"><div>${esc(m.body)}</div>
-        <span>${m.from_coach ? "Coach · " : ""}${when(m.created_at)}</span></div>`).join("")
-        : `<p class="empty">Messages with your coach show up here.</p>`}
+      ${list.length ? list.map((m) => msgBubble(m, urls)).join("")
+        : `<p class="empty">Send your coach a message or a voice note. Tell them how a workout felt, or ask anything.</p>`}
     </div>
     <form class="composer" id="cmp">
-      <input class="input" id="msg" placeholder="Message your coach" aria-label="Message your coach" autocomplete="off">
-      <button class="send" aria-label="Send">${ICO.send}</button>
+      <input class="input" id="msg" placeholder="Message your coach" aria-label="Message your coach" autocomplete="off" value="${esc(draft)}">
+      <button class="send" id="cmp-btn" aria-label="Send"></button>
     </form>`;
   document.body.classList.add("has-composer");
+  const btn = $("#cmp-btn");
+  const setBtn = () => {
+    const mic = canRecord() && !$("#msg").value.trim();
+    btn.innerHTML = mic ? ICO.mic : ICO.send;
+    btn.setAttribute("aria-label", mic ? "Record a voice message" : "Send");
+    btn.dataset.mode = mic ? "mic" : "send";
+  };
+  setBtn();
+  $("#msg").addEventListener("input", setBtn);
+  app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>${esc(b.nextElementSibling?.textContent || "Video")}</h2>${player(b.dataset.demo)}`)));
+
+  const after = (id) => api("message_sent", { message_id: id }).catch(() => {}).then(() => { if (tab === "coach" && !recNow) renderCoach(); });
   $("#cmp").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (btn.dataset.mode === "mic") return recordVoice();
     const body = $("#msg").value.trim();
     if (!body) return;
     $("#msg").value = "";
-    const { error } = await db.from("messages").insert({ body });
-    if (error) return toast(error.message);
+    const { data: row, error } = await db.from("messages").insert({ body }).select("id").single();
+    if (error) { $("#msg").value = body; return toast(error.message); }
     await renderCoach();
     window.scrollTo(0, document.body.scrollHeight);
+    after(row.id);
   });
+
+  async function recordVoice() {
+    const cmp = $("#cmp");
+    try {
+      recNow = await startRecorder((s) => { const t = $("#rec-t"); if (t) t.textContent = mmss(s); if (s >= REC_MAX) sendVoice(); });
+    } catch {
+      recNow = null;
+      return toast("Allow the microphone to send voice messages");
+    }
+    cmp.innerHTML = `<button type="button" class="rec-x" id="rec-x" aria-label="Cancel recording">✕</button>
+      <div class="rec-live"><i></i><span id="rec-t">0:00</span><em>Recording…</em></div>
+      <button type="button" class="send" id="rec-send" aria-label="Send voice message">${ICO.send}</button>`;
+    $("#rec-x").addEventListener("click", () => { recNow?.cancel(); recNow = null; renderCoach(); });
+    $("#rec-send").addEventListener("click", sendVoice);
+  }
+  async function sendVoice() {
+    if (!recNow) return;
+    const r = recNow; recNow = null;
+    const cmp = $("#cmp");
+    if (cmp) cmp.innerHTML = `<div class="rec-live"><span>Sending…</span></div>`;
+    const clip = await r.stop();
+    if (clip.blob.size < 800) { toast("That was too short"); return renderCoach(); }
+    const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${clip.ext}`;
+    const up = await db.storage.from("voice").upload(path, clip.blob, { contentType: clip.type, upsert: false });
+    if (up.error) { toast("Couldn't send the voice message"); console.error(up.error); return renderCoach(); }
+    const { data: row, error } = await db.from("messages").insert({ audio_path: path, audio_sec: clip.sec, transcript_status: "pending" }).select("id").single();
+    if (error) { toast(error.message); return renderCoach(); }
+    await renderCoach();
+    window.scrollTo(0, document.body.scrollHeight);
+    after(row.id);
+  }
+
   const unread = list.filter((m) => m.from_coach && !m.read_at).map((m) => m.id);
   if (unread.length) await db.from("messages").update({ read_at: new Date().toISOString() }).in("id", unread);
   refreshDot();
+
+  // Pick up new messages while this tab is open.
+  clearInterval(msgPoll);
+  const lastId = list.at(-1)?.id ?? null;
+  const pending = list.some((m) => m.transcript_status === "pending");
+  msgPoll = setInterval(async () => {
+    if (tab !== "coach") return clearInterval(msgPoll);
+    if (document.hidden || recNow || $("#msg")?.value.trim()) return;
+    const { data } = await db.from("messages").select("id, transcript_status").order("created_at", { ascending: false }).limit(1);
+    const top = data?.[0];
+    if ((top?.id ?? null) !== lastId || (pending && top?.transcript_status !== "pending")) renderCoach();
+  }, 12000);
 }
 
 const feelLabel = (list, v) => list.find(([k]) => k === v)?.[1] ?? "";
@@ -2074,10 +2187,11 @@ function showInstallBar() {
 // ---------------------------------------------------------------------------
 async function handleHash() {
   const h = location.hash.slice(1);
-  if (/^coach(=\w+)?$/.test(h) && user && isCoach) {
+  if (/^coach(=[\w.-]+)?$/.test(h) && user && isCoach) {
     history.replaceState(null, "", location.pathname + location.search);
     await go(tab); openCoachMode(h.split("=")[1]); return true;
   }
+  if (h === "msg" && user) { history.replaceState(null, "", location.pathname + location.search); await go("coach"); return true; }
   if (!h || !user || !/^(checkin|obs)=/.test(h)) return false;
   history.replaceState(null, "", location.pathname + location.search);
   const [k, v] = h.split("=");
@@ -2089,7 +2203,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=9");
+    const m = await import("./coach.js?v=10");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }

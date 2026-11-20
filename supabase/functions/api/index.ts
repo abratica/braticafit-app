@@ -4,7 +4,8 @@ import { analyzeMeal, fatsecretConfigured, searchFatsecret, searchUsda } from ".
 import { lookupBarcode } from "../_shared/barcode.ts";
 import { vapidKeys, pushToUser } from "../_shared/push.ts";
 import { runWeekly } from "../_shared/tasks.ts";
-import { sql } from "../_shared/db.ts";
+import { sql, ownerId } from "../_shared/db.ts";
+import { groqConfigured, suggestVideos, transcribe } from "../_shared/voice.ts";
 import { APP_URL, COACH_INBOX, DEFAULT_WELCOME, emailConfigured, renderAccessRequest, renderWelcome, sendEmail } from "../_shared/email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "https://ktpztiyqyoalrwnqtqme.supabase.co";
@@ -181,6 +182,46 @@ Deno.serve(async (req) => {
       case "weekly_now": {
         if (me.role !== "coach") return json({ error: "unauthorized" }, 403);
         return json(await runWeekly({ notify: false }));
+      }
+      case "message_sent": {
+        // After a message is saved: transcribe a voice note, notify the other side, and (client messages) suggest videos for the coach.
+        const rows = await sql`select m.*, coalesce(mb.name, mb.email) as client_name from public.messages m
+                               left join public.members mb on mb.user_id = m.user_id where m.id = ${body.message_id ?? null}`;
+        const m = rows[0];
+        if (!m) return json({ error: "Message not found" }, 404);
+        if (me.role === "client" ? (m.user_id !== me.id || m.from_coach) : !m.from_coach) return json({ error: "unauthorized" }, 403);
+        if (Date.now() - new Date(m.created_at).getTime() > 15 * 60e3) return json({ error: "too old" }, 400);
+
+        let text = String(m.body ?? "").trim();
+        if (m.audio_path && groqConfigured() && m.transcript_status !== "done") {
+          await sql`update public.messages set transcript_status = 'pending' where id = ${m.id}`;
+          try {
+            const { data: blob, error } = await admin.storage.from("voice").download(m.audio_path);
+            if (error || !blob) throw error ?? new Error("audio missing");
+            const t = await transcribe(blob, m.audio_path.split("/").pop() || "voice.webm");
+            await sql`update public.messages set transcript = ${t}, transcript_status = 'done' where id = ${m.id}`;
+            text = [text, t].filter(Boolean).join("\n");
+          } catch (e) {
+            console.error("transcribe failed", (e as Error).message);
+            await sql`update public.messages set transcript_status = 'failed' where id = ${m.id}`;
+          }
+        }
+        const snippet = (text || (m.audio_path ? "Voice message" : m.video_title ? `Sent a video: ${m.video_title}` : "New message")).slice(0, 140);
+        const voice = m.audio_path ? "🎤 " : "";
+        const tasks: Promise<unknown>[] = [];
+        if (m.from_coach) {
+          tasks.push(pushToUser(m.user_id, { title: "Coach Andrew", body: voice + snippet, url: "./#msg", tag: "msg" }));
+        } else {
+          const owner = await ownerId();
+          if (owner) tasks.push(pushToUser(owner, { title: m.client_name ?? "Client", body: voice + snippet, url: `./#coach=inbox.${m.user_id}`, tag: `msg-${m.user_id}` }));
+          if (groqConfigured() && text) {
+            tasks.push(suggestVideos(m.user_id, text).then((items) => sql`
+              insert into public.message_suggestions (message_id, items) values (${m.id}, ${sql.json(items as any)})
+              on conflict (message_id) do update set items = excluded.items`).catch((e) => console.error("suggest failed", (e as Error).message)));
+          }
+        }
+        await Promise.allSettled(tasks);
+        return json({ ok: true });
       }
       default:
         return json({ error: "unknown action" }, 400);

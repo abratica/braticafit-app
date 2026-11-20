@@ -489,3 +489,18 @@ a.btn.primary { color: var(--accent-ink); }
 /* Move a workout to another day */
 .move-row { display: flex; gap: 10px; align-items: flex-end; margin-top: 16px; }
 .move-row .field { flex: 1; margin: 0; }
+
+/* Voice messages */
+.bubble.voice { max-width: 88%; width: 300px; }
+.bubble audio { display: block; width: 100%; height: 40px; margin: 2px 0; }
+.bubble .tx { margin: 8px 0 0; font-size: 14px; line-height: 1.4; white-space: pre-wrap; opacity: .92; }
+.bubble.me .tx.muted { color: rgba(255,255,255,.75); }
+.bubble .msg-text + audio, .bubble .msg-text + .msg-video { margin-top: 8px; }
+.msg-video { display: grid; place-items: center; width: 100%; min-width: 220px; aspect-ratio: 16 / 9; margin-top: 4px; border: 0; border-radius: 10px;
+  background: #1c1c1c center / cover no-repeat; cursor: pointer; }
+.msg-vt { display: block; margin-top: 6px; font-size: 14px; }
+.composer .rec-live { flex: 1; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px; border-radius: 22px; background: var(--card); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.composer .rec-live i { width: 10px; height: 10px; border-radius: 50%; background: #e5484d; animation: recpulse 1s infinite; }
+.composer .rec-live em { font-style: normal; color: var(--muted); font-size: 13px; }
+.composer .rec-x { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 16px; cursor: pointer; }
+@keyframes recpulse { 50% { opacity: .3; } }
