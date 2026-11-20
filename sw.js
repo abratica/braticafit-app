@@ -1,6 +1,6 @@
 // App shell cache + push notifications.
-const CACHE = "psh-v18";
-const SHELL = ["./", "index.html", "styles.css?v=15", "app.js?v=17", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/logo.webp", "icons/wordmark.webp", "icons/wordmark-lg.webp"];
+const CACHE = "psh-v19";
+const SHELL = ["./", "index.html", "styles.css?v=16", "app.js?v=18", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/logo.webp", "icons/wordmark.webp", "icons/wordmark-lg.webp"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

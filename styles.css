@@ -411,18 +411,18 @@ a.btn.primary { color: var(--accent-ink); }
 .split-ends { display: flex; justify-content: space-between; font: 600 14px/1 var(--display); letter-spacing: .04em; margin-bottom: 10px; }
 
 /* Food tab: week strip and meal sections */
-.wk { display: grid; grid-template-columns: 28px repeat(7, 1fr) 28px; gap: 4px; align-items: center; margin: 10px 0 2px; }
-.wk-nav { border: 0; background: none; color: var(--muted); font-size: 24px; line-height: 1; padding: 6px 0; cursor: pointer; }
-.wk-nav:disabled { opacity: .25; cursor: default; }
-.wk-day { border: 0; background: none; color: var(--ink); border-radius: 12px; padding: 7px 0 6px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.wk-day span { font: 500 11px/1 var(--display); letter-spacing: .1em; color: var(--muted); }
-.wk-day b { font: 600 17px/1 var(--display); }
-.wk-day i { width: 5px; height: 5px; border-radius: 50%; background: transparent; }
-.wk-day i.dot { background: var(--accent); }
-.wk-day.is-today b { color: var(--accent); }
-.wk-day[aria-current="date"] { background: var(--card); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.wk-day[aria-current="date"].is-today b { color: var(--ink); }
-.wk-day:disabled { opacity: .3; cursor: default; }
+.fwk { display: grid; grid-template-columns: 28px repeat(7, 1fr) 28px; gap: 4px; align-items: center; margin: 10px 0 2px; }
+.fwk-nav { border: 0; background: none; color: var(--muted); font-size: 24px; line-height: 1; padding: 6px 0; cursor: pointer; }
+.fwk-nav:disabled { opacity: .25; cursor: default; }
+.fwk-day { border: 0; background: none; color: var(--ink); border-radius: 12px; padding: 7px 0 6px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.fwk-day span { font: 500 11px/1 var(--display); letter-spacing: .1em; color: var(--muted); }
+.fwk-day b { font: 600 17px/1 var(--display); }
+.fwk-day i { width: 5px; height: 5px; border-radius: 50%; background: transparent; }
+.fwk-day i.dot { background: var(--accent); }
+.fwk-day.is-today b { color: var(--accent); }
+.fwk-day[aria-current="date"] { background: var(--card); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.fwk-day[aria-current="date"].is-today b { color: var(--ink); }
+.fwk-day:disabled { opacity: .3; cursor: default; }
 .today-pill { display: block; margin: 8px auto 0; border: 1px solid var(--accent); background: none; color: var(--accent); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .meal-sec { margin-top: 18px; }
 .meal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -444,3 +444,20 @@ a.btn.primary { color: var(--accent-ink); }
 .s-list .meta b { font-weight: 600; color: var(--ink); }
 .fs-attr { text-align: right; margin: 6px 2px 0; font-size: 12px; }
 .fs-attr a { color: var(--muted); }
+
+/* Workout session: last time, supersets, rest timer */
+.last-time { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.last-time b { color: var(--ink); font-weight: 600; }
+.ss-head { font: 500 11px/1.2 var(--display); text-transform: uppercase; letter-spacing: .14em; color: var(--accent); margin-bottom: 4px; }
+.ss-item + .ss-item { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.ss-tag { display: inline-block; font: 600 12px/1 var(--display); letter-spacing: .06em; color: var(--accent-ink); background: var(--accent); border-radius: 6px; padding: 4px 6px; margin-right: 8px; vertical-align: 2px; }
+.set-in::placeholder { color: var(--muted); opacity: .55; }
+#restbar { position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 40; overflow: hidden;
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); max-width: 616px; margin: 0 auto; }
+#restbar .rb-fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(251,67,17,.16); transition: width .25s linear; pointer-events: none; }
+#restbar .rb-label { position: relative; font: 500 12px/1 var(--display); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+#restbar .rb-time { position: relative; font: 600 26px/1 var(--display); margin-right: auto; min-width: 64px; }
+#restbar button { position: relative; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 10px; padding: 8px 10px; font-weight: 600; font-size: 13px; cursor: pointer; }
+#restbar.go { background: var(--accent); }
+#restbar.go .rb-label, #restbar.go .rb-time { color: var(--accent-ink); }

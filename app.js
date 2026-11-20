@@ -447,8 +447,8 @@ function openPlanner() {
     </div>
     <div id="pw" hidden>
       <label class="field"><span>Exercises, one per line</span><textarea class="input" id="px" rows="6"
-        placeholder="Goblet squat, 3x10, 50&#10;Romanian deadlift, 3x8, 60&#10;Side plank, 3x30 sec"></textarea></label>
-      <p class="small muted" style="margin-top:-4px">Name, sets x reps, weight. Add a YouTube link on any line for its demo.</p>
+        placeholder="Goblet squat, 3x10, 50, rest 90&#10;A1 Bench press, 3x8, 135&#10;A2 Chest-supported row, 3x10, 40, rest 120&#10;Side plank, 3x30 sec"></textarea></label>
+      <p class="small muted" style="margin-top:-4px">Name, sets x reps, weight. Optional: rest 60 (seconds) and a YouTube link for a demo. Superset: start the lines with A1, A2 (B1, B2…).</p>
     </div>
     <label class="field"><span>Minutes <span class="muted">(optional)</span></span><input class="input" id="pm" type="number" inputmode="numeric"></label>
     <label class="field"><span>Note <span class="muted">(optional)</span></span><input class="input" id="pn" placeholder="Slow 3-second lower on the squats"></label>
@@ -491,10 +491,18 @@ function openPlanner() {
 }
 
 function parseExercises(text) {
-  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((raw) => {
+    // "A1 Bench press, ..." -> superset A
+    const ss = raw.match(/^([A-Za-z])\d\s*[.):-]?\s+(.+)$/);
+    const line = ss ? ss[2] : raw;
     const parts = line.split(",").map((p) => p.trim()).filter(Boolean);
-    let demo = null;
-    const rest = parts.filter((p) => { const id = ytId(p); if (id && /youtu/.test(p)) { demo = id; return false; } return true; });
+    let demo = null, restSec = null;
+    const rest = parts.filter((p) => {
+      const id = ytId(p); if (id && /youtu/.test(p)) { demo = id; return false; }
+      const r = p.match(/^(?:rest\s*)?(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds|m|min|mins|minutes)?(?:\s*rest)?$/i);
+      if (r && /rest/i.test(p)) { restSec = Math.round(Number(r[1]) * (/^m/i.test(r[2] || "") ? 60 : 1)); return false; }
+      return true;
+    });
     const [name, scheme = "", weight = ""] = rest;
     const m = scheme.match(/^(\d+)\s*[x×]\s*(.+)$/i);
     const nSets = m ? Math.min(Number(m[1]), 10) : 0;
@@ -502,6 +510,7 @@ function parseExercises(text) {
     const wt = weight.replace(/\s*(lb|lbs|kg)$/i, "");
     return {
       name: name || line, scheme: m ? `${m[1]} × ${reps}` : scheme || null, demo_video_id: demo,
+      rest_sec: restSec != null ? Math.min(900, restSec) : null, superset: ss ? ss[1].toUpperCase() : null,
       sets: Array.from({ length: nSets }, () => ({ reps, weight: wt, done: false })),
     };
   });
@@ -519,21 +528,51 @@ async function openSession(id) {
   if (!w) return toast("Couldn't find that workout");
   window.scrollTo(0, 0);
   const list = exs ?? [];
+  const last = await lastTimes(list, w);
   $("#sub").textContent = w.scheduled_on === ymd() ? "Today" : dayFmt.format(fromYmd(w.scheduled_on));
 
-  const exCard = (x, i) => `
-    <div class="card ex" data-ex="${i}">
+  // Superset labels: A1, A2… for exercises sharing a letter.
+  const ssLabel = {};
+  for (const x of list) if (x.superset) {
+    const n = list.filter((y) => y.superset === x.superset && y.position <= x.position).length;
+    ssLabel[x.id] = `${x.superset}${n}`;
+  }
+  const restOf = (x) => (x.rest_sec ?? REST_DEFAULT);
+  const exInner = (x, i) => {
+    const prev = last[x.name.toLowerCase()];
+    const sub = [x.scheme, !x.superset || isLastInSuperset(list, x) ? `rest ${fmtRest(restOf(x))}` : "no rest, go to next"].filter(Boolean).join(" · ");
+    return `
       <div class="ex-head">
         ${x.demo_video_id ? `<button class="ex-demo" data-demo="${x.demo_video_id}" style="background-image:url('${ytThumb(x.demo_video_id)}')" aria-label="Watch the ${esc(x.name)} demo"><span class="play sm">${ICO.play}</span></button>` : ""}
-        <div class="main"><div class="name">${esc(x.name)}</div><div class="small muted">${esc(x.scheme || "")}${x.demo_video_id ? " · tap the video for the demo" : ""}</div></div>
+        <div class="main"><div class="name">${ssLabel[x.id] ? `<span class="ss-tag">${ssLabel[x.id]}</span>` : ""}${esc(x.name)}</div><div class="small muted">${esc(sub)}</div></div>
       </div>
+      ${prev ? `<div class="last-time">Last time · ${shortFmt.format(fromYmd(prev.day))}: <b>${esc(prev.summary)}</b></div>` : ""}
       ${x.sets?.length ? `<div class="set-grid set-head"><span>Set</span><span>Reps</span><span>Weight</span><span></span></div>
-        ${x.sets.map((s, j) => `<div class="set-grid" data-set="${j}">
+        ${x.sets.map((s, j) => {
+          const p = prev?.sets?.[j];
+          return `<div class="set-grid" data-set="${j}">
           <span class="set-n">${j + 1}</span>
-          <input class="input set-in" data-f="reps" value="${esc(s.reps)}" aria-label="Set ${j + 1} reps">
-          <input class="input set-in" data-f="weight" value="${esc(s.weight)}" inputmode="decimal" aria-label="Set ${j + 1} weight">
-          <button class="set-done" data-done aria-pressed="${!!s.done}" aria-label="Set ${j + 1} done">${ICO.check}</button></div>`).join("")}` : ""}
-    </div>`;
+          <input class="input set-in" data-f="reps" value="${esc(s.reps)}" placeholder="${esc(p?.reps ?? "")}" aria-label="Set ${j + 1} reps">
+          <input class="input set-in" data-f="weight" value="${esc(s.weight)}" placeholder="${esc(p?.weight ?? "")}" inputmode="decimal" aria-label="Set ${j + 1} weight">
+          <button class="set-done" data-done aria-pressed="${!!s.done}" aria-label="Set ${j + 1} done">${ICO.check}</button></div>`;
+        }).join("")}` : ""}`;
+  };
+  const exBlocks = () => {
+    let html = "", i = 0;
+    while (i < list.length) {
+      const x = list[i];
+      if (x.superset) {
+        const group = [];
+        while (i < list.length && list[i].superset === x.superset) { group.push(i); i++; }
+        html += `<div class="card ex ss"><div class="ss-head">Superset ${x.superset} · go straight through, then rest</div>
+          ${group.map((k) => `<div class="ss-item" data-ex="${k}">${exInner(list[k], k)}</div>`).join("")}</div>`;
+      } else {
+        html += `<div class="card ex" data-ex="${i}">${exInner(x, i)}</div>`;
+        i++;
+      }
+    }
+    return html;
+  };
 
   app.innerHTML = `
     <div class="sess-head">
@@ -542,14 +581,14 @@ async function openSession(id) {
     </div>
     ${w.note ? `<h3>Coach note</h3><div class="card note">${esc(w.note)}</div>` : ""}
     ${w.kind === "video" && w.video_id ? `<div style="margin-top:14px">${player(w.video_id)}</div>` : ""}
-    ${list.length ? `<h3>Exercises</h3>${list.map(exCard).join("")}` : ""}
+    ${list.length ? `<h3>Exercises</h3>${exBlocks()}` : ""}
     ${w.completed_at
       ? `<div class="done-line" style="margin-top:16px">${ICO.check}<span>Done${w.feel ? ` · felt ${feelLabel(FEEL, w.feel).toLowerCase()}` : ""}</span></div>
          <button class="btn ghost block" id="undo" style="margin-top:10px">Mark not done</button>`
       : `<button class="btn primary block" id="finish" style="margin-top:16px">${w.kind === "video" ? "Mark done" : "Finish workout"}</button>`}
     <button class="btn danger block" id="del-w" style="margin-top:10px">Delete workout</button>`;
 
-  $("#back").addEventListener("click", () => go(back));
+  $("#back").addEventListener("click", () => { stopRest(); go(back); });
   app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openSheet(`<h2>Demo</h2>${player(b.dataset.demo)}`)));
 
   const timers = {};
@@ -575,7 +614,15 @@ async function openSession(id) {
       const j = Number(b.closest("[data-set]").dataset.set);
       list[i].sets[j].done = !list[i].sets[j].done;
       b.setAttribute("aria-pressed", String(list[i].sets[j].done));
+      // Typed nothing? Keep last time's numbers (shown as hints) for this set.
+      const row = b.closest("[data-set]");
+      for (const inp of row.querySelectorAll(".set-in")) if (!inp.value && inp.placeholder) {
+        inp.value = inp.placeholder; list[i].sets[j][inp.dataset.f] = inp.value;
+      }
       save(i);
+      // Rest starts after a set; in a superset, only after the last exercise of the round.
+      const x = list[i];
+      if (list[i].sets[j].done && (!x.superset || isLastInSuperset(list, x))) startRest(x.rest_sec ?? REST_DEFAULT);
     });
   });
 
@@ -586,6 +633,7 @@ async function openSession(id) {
       if (!b) return;
       const { error } = await db.from("workouts").update({ completed_at: new Date().toISOString(), feel: b.dataset.v }).eq("id", w.id);
       if (error) return toast(error.message);
+      stopRest();
       closeSheet();
       toast("Nice work");
       go(back);
@@ -601,6 +649,103 @@ async function openSession(id) {
     toast("Deleted");
     go(back);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Last time's numbers, supersets and the rest timer
+// ---------------------------------------------------------------------------
+const REST_DEFAULT = 90;
+const fmtRest = (sec) => (sec >= 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : `${sec}s`);
+const isLastInSuperset = (list, x) => !list.some((y) => y.superset === x.superset && y.position > x.position);
+
+// The most recent earlier session of each exercise (by name) that has numbers in it.
+async function lastTimes(list, w) {
+  const names = [...new Set(list.map((x) => x.name))];
+  if (!names.length) return {};
+  const { data } = await db.from("workout_exercises")
+    .select("name,sets,workouts!inner(scheduled_on)")
+    .in("name", names).neq("workout_id", w.id).lte("workouts.scheduled_on", w.scheduled_on)
+    .order("created_at", { ascending: false }).limit(200);
+  const out = {};
+  const rows = (data ?? []).slice().sort((a, b) => (b.workouts.scheduled_on > a.workouts.scheduled_on ? 1 : -1));
+  for (const r of rows) {
+    const key = r.name.toLowerCase();
+    if (out[key]) continue;
+    const sets = (r.sets ?? []).filter((s) => s.done || s.weight || s.reps);
+    const done = sets.filter((s) => s.done);
+    const use = done.length ? done : [];
+    if (!use.length) continue;
+    out[key] = {
+      day: r.workouts.scheduled_on,
+      sets: use.map((s) => ({ reps: s.reps ?? "", weight: s.weight ?? "" })),
+      summary: use.map((s) => (s.weight ? `${s.weight} × ${s.reps}` : `${s.reps}`)).join(", "),
+    };
+  }
+  return out;
+}
+
+// Rest timer: a bar above the tabs. Counts from an end time, so it stays right if the screen sleeps.
+let rest = { end: 0, total: 0, tick: null, audio: null };
+function startRest(sec) {
+  if (!sec) return;
+  try { rest.audio ??= new (window.AudioContext || window.webkitAudioContext)(); rest.audio.resume(); } catch {}
+  rest.total = sec;
+  rest.end = Date.now() + sec * 1000;
+  let bar = $("#restbar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "restbar";
+    bar.innerHTML = `<div class="rb-fill"></div><span class="rb-label">Rest</span><b class="rb-time"></b>
+      <button data-rb="-15" aria-label="15 seconds less">−15</button><button data-rb="15" aria-label="15 seconds more">+15</button><button data-rb="skip">Skip</button>`;
+    document.body.appendChild(bar);
+    bar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-rb]");
+      if (!b) return;
+      if (b.dataset.rb === "skip") return stopRest();
+      rest.end += Number(b.dataset.rb) * 1000;
+      rest.total = Math.max(rest.total, Math.ceil((rest.end - Date.now()) / 1000));
+      drawRest();
+    });
+  }
+  bar.classList.remove("go");
+  bar.hidden = false;
+  clearInterval(rest.tick);
+  rest.tick = setInterval(drawRest, 250);
+  drawRest();
+}
+function drawRest() {
+  const bar = $("#restbar");
+  if (!bar) return;
+  const left = Math.max(0, Math.ceil((rest.end - Date.now()) / 1000));
+  $(".rb-time", bar).textContent = left ? fmtRest(left) : "Go";
+  $(".rb-fill", bar).style.width = `${rest.total ? (left / rest.total) * 100 : 0}%`;
+  if (!left) {
+    clearInterval(rest.tick);
+    bar.classList.add("go");
+    $(".rb-label", bar).textContent = "Rest's up";
+    restAlert();
+    setTimeout(() => { if (bar.classList.contains("go")) stopRest(); }, 4000);
+  } else $(".rb-label", bar).textContent = "Rest";
+}
+function restAlert() {
+  try { navigator.vibrate?.([200, 100, 200]); } catch {}
+  try {
+    const ctx = rest.audio;
+    if (!ctx) return;
+    [0, 0.25].forEach((t) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.2);
+      o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.22);
+    });
+  } catch {}
+}
+function stopRest() {
+  clearInterval(rest.tick);
+  const bar = $("#restbar");
+  if (bar) { bar.hidden = true; bar.classList.remove("go"); }
 }
 
 // Two-tap delete without a browser dialog
@@ -709,14 +854,14 @@ async function renderFood() {
     <div class="mbar-track"><div style="width:${Math.min(100, share(g, per))}%"></div></div></div>`;
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(wkStart, i));
-  const strip = `<div class="wk">
-      <button class="wk-nav" data-wk="-7" aria-label="Previous week">‹</button>
+  const strip = `<div class="fwk">
+      <button class="fwk-nav" data-wk="-7" aria-label="Previous week">‹</button>
       ${days.map((d) => {
         const k = ymd(d), future = k > todayStr;
-        return `<button class="wk-day${k === todayStr ? " is-today" : ""}" data-day="${k}" ${k === dayStr ? 'aria-current="date"' : ""} ${future ? "disabled" : ""}>
+        return `<button class="fwk-day${k === todayStr ? " is-today" : ""}" data-day="${k}" ${k === dayStr ? 'aria-current="date"' : ""} ${future ? "disabled" : ""}>
           <span>${"MTWTFSS"[(d.getDay() + 6) % 7]}</span><b>${d.getDate()}</b><i class="${logged.has(k) ? "dot" : ""}"></i></button>`;
       }).join("")}
-      <button class="wk-nav" data-wk="7" aria-label="Next week" ${ymd(wkEnd) > todayStr ? "disabled" : ""}>›</button>
+      <button class="fwk-nav" data-wk="7" aria-label="Next week" ${ymd(wkEnd) > todayStr ? "disabled" : ""}>›</button>
     </div>
     ${isToday ? "" : `<button class="today-pill" id="back-today">Back to today</button>`}`;
 
@@ -758,7 +903,7 @@ async function renderFood() {
   $("#type").addEventListener("click", () => { logTo = here(); openSearch(); });
   $("#scan").addEventListener("click", () => { logTo = here(); openScanner(); });
   $("#back-today")?.addEventListener("click", () => { foodDay = null; renderFood(); });
-  app.querySelector(".wk").addEventListener("click", (e) => {
+  app.querySelector(".fwk").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b || b.disabled) return;
     if (b.dataset.day) foodDay = b.dataset.day === todayStr ? null : b.dataset.day;
