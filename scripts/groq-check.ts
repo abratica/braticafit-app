@@ -1,11 +1,12 @@
 // CI check that the Groq key, the Whisper model and the suggestion model all work.
-import { transcribe, groqJson, SYSTEM } from "../supabase/functions/_shared/voice.ts";
+import { transcribe, groqJson, SYSTEM, chatModel } from "../supabase/functions/_shared/voice.ts";
 
 const wav = await Deno.readFile(Deno.args[0]);
 const text = await transcribe(new Blob([wav], { type: "audio/wav" }), "check.wav");
 console.log("TRANSCRIPT:", text);
 if (!/knee/i.test(text)) throw new Error("transcript looks wrong");
 
+console.log("MODEL:", await chatModel());
 const catalog = [
   "L0 | Goblet Squat | exercise | dumbbell | Squat | in coach's Library",
   "P1 | Bodyweight Split Squat With Blocked Knee | exercise | bodyweight | Single-leg | harder: Goblet Split Squat With Blocked Knee",

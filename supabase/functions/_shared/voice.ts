@@ -89,12 +89,28 @@ async function candidates(text: string, recentNames: string[]): Promise<Cand[]> 
   return ranked;
 }
 
+// Groq retires models now and then, so pick the best one it currently offers.
+const PREFER = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct",
+  "qwen/qwen3-32b", "meta-llama/llama-4-scout-17b-16e-instruct", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
+let modelCache: { id: string; at: number } | null = null;
+export async function chatModel(): Promise<string> {
+  if (modelCache && Date.now() - modelCache.at < 6 * 3600e3) return modelCache.id;
+  const r = await fetch(`${GROQ}/models`, { headers: { Authorization: `Bearer ${groqKey()}` } });
+  const ids: string[] = r.ok ? ((await r.json()).data ?? []).filter((m: any) => m.active !== false).map((m: any) => m.id) : [];
+  const id = PREFER.find((p) => ids.includes(p))
+    ?? ids.find((i) => !/whisper|tts|guard|playai|orpheus|distil|compound|prompt/i.test(i)) ?? PREFER[0];
+  modelCache = { id, at: Date.now() };
+  return id;
+}
+
 export async function groqJson(system: string, user: string): Promise<any> {
+  const model = await chatModel();
   const r = await fetch(`${GROQ}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${groqKey()}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile", temperature: 0.2, max_tokens: 500,
+      model, temperature: 0.2, max_tokens: 1500,
+      ...(/gpt-oss/.test(model) ? { reasoning_effort: "low" } : /qwen3/.test(model) ? { reasoning_format: "hidden" } : {}),
       response_format: { type: "json_object" },
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
     }),
