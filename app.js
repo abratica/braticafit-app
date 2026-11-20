@@ -3,6 +3,14 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = "https://ktpztiyqyoalrwnqtqme.supabase.co";
 const SUPABASE_KEY = "sb_publishable_aUvlMasnVDO34rV8wBWnCw_oywTssOz";
 const API = `${SUPABASE_URL}/functions/v1/api`;
+// A sign-in link that expired or was already used comes back with an error in the URL.
+const linkError = (() => {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const code = p.get("error_code") || p.get("error");
+  if (!code) return null;
+  history.replaceState(null, "", location.pathname + location.search);
+  return code;
+})();
 const db = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "implicit" } });
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -33,7 +41,7 @@ async function api(action, payload = {}) {
   const { data: { session } } = await db.auth.getSession();
   const res = await fetch(API, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}`, apikey: SUPABASE_KEY },
+    headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}) },
     body: JSON.stringify({ action, ...payload }),
   });
   const data = await res.json().catch(() => ({}));
@@ -116,31 +124,69 @@ function renderSignIn() {
   $("#tabs").hidden = true;
   $("#settings").hidden = true;
   document.body.classList.add("signin");
+  const preset = new URLSearchParams(location.search).get("email") || "";
   app.innerHTML = `
     <div class="auth">
       <img class="auth-logo wide" src="icons/wordmark-lg.webp" alt="BraticaFit" width="320" height="122">
       <form id="f-email" class="auth-form">
+        <p class="auth-head">Sign in</p>
+        ${linkError ? `<p class="auth-msg">That sign-in link expired or was already used. Send yourself a fresh one.</p>`
+          : `<p class="auth-sub">Use the email Andrew added you with.</p>`}
         <label class="auth-label" for="email">Email</label>
-        <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required value="${esc(new URLSearchParams(location.search).get("email") || "")}">
-        <button class="auth-btn">Send my sign-in link</button>
+        <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required value="${esc(preset)}">
+        <button class="auth-btn">Email me a sign-in link</button>
       </form>
       <div id="sent" class="auth-sent" hidden>
         <p class="auth-head">Check your email</p>
         <p>Tap <b>Log In</b> in the email. It opens BraticaFit signed in.</p>
         <p class="auth-fine">Use this same phone. Didn't get it? Check spam, or <button type="button" class="auth-link" id="resend">send again</button>.</p>
       </div>
+      <form id="f-req" class="auth-form" hidden>
+        <p class="auth-head">Not on the list yet</p>
+        <p class="auth-sub"><span id="req-email"></span> isn't on the client list. Ask Andrew for access and you'll get an email once you're added.</p>
+        <label class="auth-label" for="req-name">Full name</label>
+        <input class="auth-input" id="req-name" autocomplete="name" placeholder="First and last name" required>
+        <label class="auth-label" for="req-note" style="margin-top:14px">Note <span class="auth-opt">(optional)</span></label>
+        <textarea class="auth-input auth-note" id="req-note" rows="3" maxlength="500" placeholder="Anything Andrew should know?"></textarea>
+        <button class="auth-btn">Request access</button>
+        <p class="auth-fine" style="margin-top:12px"><button type="button" class="auth-link" id="req-back">Use a different email</button></p>
+      </form>
+      <div id="req-done" class="auth-sent" hidden>
+        <p class="auth-head">Request sent</p>
+        <p>Andrew will get your request. Once he adds you, you'll get a welcome email that signs you right in.</p>
+      </div>
     </div>`;
+  const show = (id) => { for (const k of ["f-email", "sent", "f-req", "req-done"]) $("#" + k).hidden = k !== id; };
+  const email = () => $("#email").value.trim().toLowerCase();
+  const busy = (form, on, label) => { const b = $(`#${form} .auth-btn`); b.disabled = on; if (label) b.textContent = label; };
+
   const send = async () => {
-    const { error } = await db.auth.signInWithOtp({
-      email: $("#email").value.trim(),
-      options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname },
-    });
-    if (error) return toast(error.message);
-    $("#f-email").hidden = true;
-    $("#sent").hidden = false;
+    busy("f-email", true, "Sending…");
+    try {
+      const r = await api("send_link", { email: email() });
+      if (r.allowed === false) {
+        $("#req-email").textContent = email();
+        show("f-req");
+        $("#req-name").focus();
+      } else show("sent");
+    } catch (e) { toast(e.message); }
+    busy("f-email", false, "Email me a sign-in link");
   };
   $("#f-email").addEventListener("submit", (e) => { e.preventDefault(); send(); });
   $("#resend").addEventListener("click", send);
+  $("#req-back").addEventListener("click", () => { show("f-email"); $("#email").focus(); });
+  $("#f-req").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("#req-name").value.trim();
+    if (name.split(/\s+/).length < 2) return toast("Add your first and last name");
+    busy("f-req", true, "Sending…");
+    try {
+      const r = await api("request_access", { email: email(), name, note: $("#req-note").value });
+      if (r.allowed) return send();
+      show("req-done");
+    } catch (err) { toast(err.message); }
+    busy("f-req", false, "Request access");
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,7 +1236,7 @@ async function renderSettings() {
 
     <button class="btn ghost block" id="out" style="margin-top:18px">Sign out</button>
   `;
-  $("#coach-open")?.addEventListener("click", openCoachMode);
+  $("#coach-open")?.addEventListener("click", () => openCoachMode());
   $("#push")?.addEventListener("click", enablePush);
   $("#test")?.addEventListener("click", async () => {
     try { const r = await api("test_push"); toast(r.sent ? "Sent. It should pop up in a moment." : "No devices subscribed yet"); }
@@ -1262,7 +1308,10 @@ function showInstallBar() {
 // ---------------------------------------------------------------------------
 async function handleHash() {
   const h = location.hash.slice(1);
-  if (h === "coach" && user && isCoach) { history.replaceState(null, "", location.pathname + location.search); await go(tab); openCoachMode(); return true; }
+  if (/^coach(=\w+)?$/.test(h) && user && isCoach) {
+    history.replaceState(null, "", location.pathname + location.search);
+    await go(tab); openCoachMode(h.split("=")[1]); return true;
+  }
   if (!h || !user || !/^(checkin|obs)=/.test(h)) return false;
   history.replaceState(null, "", location.pathname + location.search);
   const [k, v] = h.split("=");
@@ -1271,11 +1320,11 @@ async function handleHash() {
   return false;
 }
 // Coach mode lives in coach.js and is only fetched for the coach's account.
-async function openCoachMode() {
+async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=4");
-    await m.openCoach({ db, user, esc, toast, ymd, api, exit: () => go(tab) });
+    const m = await import("./coach.js?v=5");
+    await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
 function markTab() {

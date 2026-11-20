@@ -5,6 +5,7 @@ export const APP_URL = "https://abratica.github.io/braticafit-app/";
 const LOGO = APP_URL + "icons/wordmark-email.png";
 const FROM = "Andrew from BraticaFit <andrew@braticafit.com>";
 const REPLY_TO = "andrew@braticafit.com";
+export const COACH_INBOX = "andrew@braticafit.com";
 
 export const DEFAULT_WELCOME = {
   subject: "Welcome to BraticaFit, {first name}",
@@ -28,10 +29,11 @@ export function emailConfigured() {
 }
 
 // Fill in {first name} and turn the plain-text body into the branded HTML email.
-export function renderWelcome(tpl: { subject: string; body: string }, name: string, email: string) {
+// `signIn` is a one-time link that opens the app already signed in; without it the button just opens the app.
+export function renderWelcome(tpl: { subject: string; body: string }, name: string, email: string, signIn?: string) {
   const first = (name || "").trim().split(/\s+/)[0] || "there";
   const fill = (s: string) => s.replace(/\{\s*first name\s*\}/gi, first);
-  const link = `${APP_URL}?email=${encodeURIComponent(email)}`;
+  const link = signIn || `${APP_URL}?email=${encodeURIComponent(email)}`;
   const subject = fill(tpl.subject).trim() || "Welcome to BraticaFit";
   let body = fill(tpl.body).replace(/\r\n/g, "\n").trim();
   if (!/\{\s*button\s*\}/i.test(body)) body += "\n\n{button}";
@@ -46,26 +48,46 @@ export function renderWelcome(tpl: { subject: string; body: string }, name: stri
       : `<p style="margin:0 0 18px;font:16px/1.55 Arial,Helvetica,sans-serif;color:#eeeeee">${esc(p).replace(/\n/g, "<br>")}</p>`
   ).join("\n");
 
-  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#0d0d0d">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d0d0d"><tr><td align="center" style="padding:32px 16px">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
-    <tr><td style="padding:0 0 26px"><img src="${LOGO}" width="200" alt="BraticaFit" style="display:block;width:200px;height:auto;border:0"></td></tr>
-    <tr><td style="background:#171717;border:1px solid #2a2a2a;border-radius:16px;padding:28px 26px 10px">${blocks}</td></tr>
-    <tr><td style="padding:18px 4px 0;font:12px/1.5 Arial,Helvetica,sans-serif;color:#8a8a8a">Button not working? Open ${esc(APP_URL)} and sign in with ${esc(email)}.</td></tr>
-  </table>
-</td></tr></table></body></html>`;
-
+  const html = layout(blocks, `Button not working or expired? Open ${esc(APP_URL)} and sign in with ${esc(email)}.`);
   const text = body.replace(/\{\s*button\s*\}/gi, `Open BraticaFit: ${link}`);
   return { subject, html, text };
 }
 
-export async function sendEmail(to: string, msg: { subject: string; html: string; text: string }) {
+function layout(inner: string, foot: string) {
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#0d0d0d">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d0d0d"><tr><td align="center" style="padding:32px 16px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
+    <tr><td style="padding:0 0 26px"><img src="${LOGO}" width="200" alt="BraticaFit" style="display:block;width:200px;height:auto;border:0"></td></tr>
+    <tr><td style="background:#171717;border:1px solid #2a2a2a;border-radius:16px;padding:28px 26px 10px">${inner}</td></tr>
+    <tr><td style="padding:18px 4px 0;font:12px/1.5 Arial,Helvetica,sans-serif;color:#8a8a8a">${foot}</td></tr>
+  </table>
+</td></tr></table></body></html>`;
+}
+
+// Heads-up to Andrew when someone asks for access from the sign-in screen.
+export function renderAccessRequest(r: { name: string; email: string; note?: string | null }) {
+  const p = (t: string) => `<p style="margin:0 0 18px;font:16px/1.55 Arial,Helvetica,sans-serif;color:#eeeeee">${t}</p>`;
+  const link = `${APP_URL}#coach=clients`;
+  const inner = p(`<b>${esc(r.name)}</b> asked for access to BraticaFit.`) +
+    p(`Email: ${esc(r.email)}`) +
+    (r.note ? p(`Note: ${esc(r.note).replace(/\n/g, "<br>")}`) : "") +
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 22px"><tr><td style="border-radius:10px;background:#fb4311">
+      <a href="${link}" style="display:inline-block;padding:14px 26px;font:700 15px/1 Arial,Helvetica,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#ffffff;text-decoration:none">Review in coach mode</a>
+    </td></tr></table>`;
+  return {
+    subject: `Access request: ${r.name}`,
+    html: layout(inner, "Add them as a client or dismiss the request on your Clients page."),
+    text: `${r.name} (${r.email}) asked for access to BraticaFit.${r.note ? `\nNote: ${r.note}` : ""}\n\nReview: ${link}`,
+  };
+}
+
+export async function sendEmail(to: string, msg: { subject: string; html: string; text: string }, replyTo = REPLY_TO) {
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key) throw new Error("Email isn't connected yet");
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM, to: [to], reply_to: REPLY_TO, ...msg }),
+    body: JSON.stringify({ from: FROM, to: [to], reply_to: replyTo, ...msg }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.message || `Email failed (${res.status})`);

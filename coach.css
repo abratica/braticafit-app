@@ -178,6 +178,11 @@ body.coach-on .top, body.coach-on .bottom-nav, body.coach-on #app { display: non
 .c-mail input:focus, .c-mail textarea:focus { outline: none; border-color: var(--accent); }
 .c-mail-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
+.c-requests { border-color: rgba(251,67,17,.45); }
+.c-requests h3 { display: flex; align-items: center; gap: 10px; }
+.c-req-note { font-size: 13px; color: var(--ink); opacity: .85; margin-top: 4px; overflow-wrap: anywhere; }
+.c-badge.hot { background: var(--accent); color: #fff; }
+
 /* Coach entry in Settings */
 .coach-entry { display: flex; align-items: center; gap: 12px; }
 .coach-entry .main { flex: 1; }

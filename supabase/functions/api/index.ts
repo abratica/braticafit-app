@@ -5,7 +5,7 @@ import { lookupBarcode } from "../_shared/barcode.ts";
 import { vapidKeys, pushToUser } from "../_shared/push.ts";
 import { runWeekly } from "../_shared/tasks.ts";
 import { sql } from "../_shared/db.ts";
-import { DEFAULT_WELCOME, emailConfigured, renderWelcome, sendEmail } from "../_shared/email.ts";
+import { APP_URL, COACH_INBOX, DEFAULT_WELCOME, emailConfigured, renderAccessRequest, renderWelcome, sendEmail } from "../_shared/email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "https://ktpztiyqyoalrwnqtqme.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_aUvlMasnVDO34rV8wBWnCw_oywTssOz";
@@ -34,14 +34,76 @@ async function getCaller(req: Request): Promise<Caller | null> {
   return { id: user.id, email: user.email ?? "", role };
 }
 
+// Service-level auth client: only used to make sign-in links and send sign-in emails.
+const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const cleanEmail = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+// Is this email allowed in? The coach's own email, or someone on the client list.
+async function isAllowed(email: string): Promise<boolean> {
+  const rows = await sql`
+    select (exists (select 1 from public.members where email = ${email})
+         or exists (select 1 from auth.users u
+                    join private.config c on c.key = 'owner_id' and c.value = u.id::text
+                    where lower(u.email) = ${email})) as ok`;
+  return rows[0]?.ok === true;
+}
+
+// One-time link that opens the app already signed in (valid for the sign-in link lifetime).
+async function signInLink(email: string): Promise<string> {
+  const redirectTo = `${APP_URL}?email=${encodeURIComponent(email)}`;
+  let r = await admin.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } });
+  if (r.error) r = await admin.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } });
+  if (r.error || !r.data?.properties?.action_link) throw r.error ?? new Error("Couldn't make a sign-in link");
+  return r.data.properties.action_link;
+}
+
+// Actions anyone can call from the sign-in screen.
+async function publicAction(body: Record<string, unknown>): Promise<Response | null> {
+  if (body.action === "send_link") {
+    const email = cleanEmail(body.email);
+    if (!EMAIL_RE.test(email)) return json({ error: "Enter a valid email" }, 400);
+    if (!(await isAllowed(email))) return json({ allowed: false });
+    const { error } = await admin.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: APP_URL } });
+    if (error) return json({ error: /rate|seconds/i.test(error.message) ? "Too many tries. Wait a minute and try again." : error.message }, 429);
+    return json({ allowed: true, sent: true });
+  }
+  if (body.action === "request_access") {
+    const email = cleanEmail(body.email);
+    const name = String(body.name ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
+    const note = String(body.note ?? "").trim().slice(0, 500) || null;
+    if (!EMAIL_RE.test(email)) return json({ error: "Enter a valid email" }, 400);
+    if (name.split(" ").length < 2) return json({ error: "Add your first and last name" }, 400);
+    if (await isAllowed(email)) return json({ allowed: true });
+    const recent = await sql`select count(*)::int as n from public.access_requests where created_at > now() - interval '1 hour'`;
+    if (recent[0].n >= 15) return json({ error: "Too many requests right now. Try again later." }, 429);
+    const row = await sql`
+      insert into public.access_requests (email, name, note) values (${email}, ${name}, ${note})
+      on conflict (email) where status = 'pending' do update set name = excluded.name, note = excluded.note
+      returning (xmax = 0) as is_new`;
+    if (row[0]?.is_new && emailConfigured()) {
+      try { await sendEmail(COACH_INBOX, renderAccessRequest({ name, email, note }), email); }
+      catch (e) { console.error("request notice failed", e); }
+    }
+    return json({ requested: true });
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method" }, 405);
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const pub = await publicAction(body);
+    if (pub) return pub;
+
     const me = await getCaller(req);
     if (!me) return json({ error: "unauthorized" }, 401);
-    const body = await req.json().catch(() => ({}));
 
     switch (body.action) {
       case "analyze": {
@@ -78,12 +140,13 @@ Deno.serve(async (req) => {
         const tpl = { subject: saved.welcome_subject ?? DEFAULT_WELCOME.subject, body: saved.welcome_body ?? DEFAULT_WELCOME.body };
         if (body.test) {
           if (!me.email) return json({ error: "No email on your account" }, 400);
-          await sendEmail(me.email, renderWelcome(tpl, "Andrew", me.email));
+          await sendEmail(me.email, renderWelcome(tpl, "Andrew", me.email, await signInLink(me.email).catch(() => undefined)));
           return json({ sent: me.email });
         }
         const m = await sql`select id, email, name from public.members where id = ${body.member_id ?? null}`;
         if (!m.length) return json({ error: "Client not found" }, 404);
-        await sendEmail(m[0].email, renderWelcome(tpl, m[0].name ?? "", m[0].email));
+        const link = await signInLink(m[0].email).catch((e) => { console.error("sign-in link failed", e); return undefined; });
+        await sendEmail(m[0].email, renderWelcome(tpl, m[0].name ?? "", m[0].email, link));
         await sql`update public.members set welcomed_at = now() where id = ${m[0].id}`;
         return json({ sent: m[0].email });
       }

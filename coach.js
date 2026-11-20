@@ -72,10 +72,10 @@ const IC = {
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
 };
 
-export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
+export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=3"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=4"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -84,7 +84,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
   document.body.appendChild(root);
 
   const st = {
-    view: "dashboard", channels: [], data: {}, demos: [], members: [], confirmRm: null, mail: null,
+    view: ["dashboard", "library", "clients", "programs", "inbox", "calls"].includes(view) ? view : "dashboard", channels: [], data: {}, demos: [], members: [], requests: [], confirmRm: null, mail: null,
     lib: { channel: null, bucket: "all", q: "", sort: "demo", clean: true, shown: PAGE, tab: "videos" },
   };
 
@@ -117,7 +117,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
         <img class="c-wordmark" src="icons/wordmark.webp" alt="BraticaFit">
         <nav class="c-nav" aria-label="Coach">
           ${nav.map(([k, label, ic]) => `<button data-nav="${k}" ${st.view === k ? 'aria-current="page"' : ""}>${SVG(IC[ic])}<span>${label}</span>
-            ${k === "library" && st.demos.length ? `<i class="c-badge">${st.demos.length}</i>` : ""}</button>`).join("")}
+            ${k === "library" && st.demos.length ? `<i class="c-badge">${st.demos.length}</i>` : ""}${k === "clients" && st.requests.length ? `<i class="c-badge hot">${st.requests.length}</i>` : ""}</button>`).join("")}
         </nav>
         <div class="c-side-foot">
           <div class="c-mode" role="group" aria-label="Mode"><button aria-pressed="true">Coach</button><button aria-pressed="false" data-exit>Me</button></div>
@@ -147,9 +147,25 @@ export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
 
   // ---------- clients ----------
   async function loadMembers() {
-    const { data, error } = await db.from("members").select("*").order("invited_at", { ascending: false });
+    const [{ data, error }, { data: reqs }] = await Promise.all([
+      db.from("members").select("*").order("invited_at", { ascending: false }),
+      db.from("access_requests").select("*").eq("status", "pending").order("created_at", { ascending: false }),
+    ]);
     if (error) toast(error.message);
     st.members = data ?? [];
+    st.requests = reqs ?? [];
+  }
+  function requestsCard() {
+    if (!st.requests.length) return "";
+    return `<section class="c-card c-requests">
+        <h3>Access requests <i class="c-badge">${st.requests.length}</i></h3>
+        <ul class="c-clients">${st.requests.map((r) => `<li class="c-client">
+          <div class="c-client-who"><b>${esc(r.name)}</b><span class="c-vm">${esc(r.email)} · ${esc(ago(r.created_at))}</span>
+            ${r.note ? `<span class="c-req-note">“${esc(r.note)}”</span>` : ""}</div>
+          <button class="btn primary c-rm" data-approve="${r.id}">Add as client</button>
+          <button class="btn ghost c-rm" data-dismiss="${r.id}">Dismiss</button>
+        </li>`).join("")}</ul>
+      </section>`;
   }
   function ago(ts) {
     if (!ts) return "";
@@ -207,6 +223,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
       </li>`;
     }).join("");
     return `<header class="c-head"><div><p class="c-eyebrow">${joined} joined · ${st.members.length - joined} invited</p><h1>Clients</h1></div></header>
+      ${requestsCard()}
       <section class="c-card">
         <h3>Add a client</h3>
         <form id="c-add" class="c-add">
@@ -415,6 +432,22 @@ export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
       await sendWelcome(t.dataset.welcome, m?.name || m?.email || "them");
       return render();
     }
+    if (t.dataset.approve) {
+      const r = st.requests.find((x) => x.id === t.dataset.approve);
+      if (!r) return;
+      t.disabled = true;
+      const { data: row, error } = await db.from("members").insert({ email: r.email, name: r.name }).select("id").single();
+      if (error && error.code !== "23505") { t.disabled = false; return toast(error.message); }
+      await db.from("access_requests").update({ status: "approved", handled_at: new Date().toISOString() }).eq("id", r.id);
+      if (row && st.mail?.configured) await sendWelcome(row.id, r.name);
+      else toast(`Added ${r.name}`);
+      return render();
+    }
+    if (t.dataset.dismiss) {
+      await db.from("access_requests").update({ status: "dismissed", handled_at: new Date().toISOString() }).eq("id", t.dataset.dismiss);
+      toast("Request dismissed");
+      return render();
+    }
     if (t.id === "c-mail-toggle") { st.mail.open = !st.mail.open; return render(); }
     if (t.id === "c-mail-test") {
       t.disabled = true;
@@ -494,6 +527,6 @@ export async function openCoach({ db, user, esc, toast, ymd, api, exit }) {
   }
 
   root.innerHTML = shell(`<p class="c-empty-line">Loading…</p>`);
-  await Promise.all([loadIndex(), loadDemos()]);
+  await Promise.all([loadIndex(), loadDemos(), loadMembers()]);
   await render();
 }

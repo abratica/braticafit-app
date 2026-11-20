@@ -237,6 +237,12 @@ body.signin .top { display: none; }
 .auth-sent p { margin: 0 0 10px; color: rgba(242,239,233,.85); }
 .auth-sent b { color: var(--brand); }
 .auth-fine { font-size: 13px; color: rgba(242,239,233,.55) !important; }
+.auth-sub, .auth-msg { margin: -4px 0 18px; font-size: 14px; line-height: 1.45; color: rgba(242,239,233,.7); }
+.auth-msg { color: var(--chalk); background: rgba(251,67,17,.12); border: 1px solid rgba(251,67,17,.4); border-radius: 10px; padding: 10px 12px; margin-top: 0; }
+.auth-sub span { color: var(--chalk); font-weight: 600; overflow-wrap: anywhere; }
+.auth-opt { letter-spacing: .08em; text-transform: none; font-family: Inter, sans-serif; font-weight: 400; color: rgba(242,239,233,.45); }
+.auth-note { height: auto; min-height: 84px; padding: 12px 16px; resize: vertical; font: 16px/1.4 Inter, sans-serif; }
+.auth-btn:disabled { opacity: .7; }
 .auth-link { background: none; border: 0; padding: 0; color: var(--brand); font-weight: 600; cursor: pointer; text-decoration: underline; }
 
 /* ---------- Trainee app ---------- */
