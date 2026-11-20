@@ -1,6 +1,6 @@
 // App API, called from the BraticaFit web app by the signed-in coach or a client.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { analyzeMeal, searchFoods } from "../_shared/food.ts";
+import { analyzeMeal, fatsecretConfigured, searchFatsecret, searchUsda } from "../_shared/food.ts";
 import { lookupBarcode } from "../_shared/barcode.ts";
 import { vapidKeys, pushToUser } from "../_shared/push.ts";
 import { runWeekly } from "../_shared/tasks.ts";
@@ -112,15 +112,28 @@ Deno.serve(async (req) => {
         return json(result);
       }
       case "food_search": {
+        // fatsecret first (brands + restaurants); USDA when fatsecret isn't set up, fails, or has nothing.
         const q = String(body.q ?? "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 80);
         if (q.length < 2) return json({ results: [] });
-        const cached = await sql`select results from public.food_search_cache where q = ${q} and created_at > now() - interval '30 days'`;
-        if (cached.length) return json({ results: cached[0].results });
+        const cachedAs = async (key: string) =>
+          (await sql`select results from public.food_search_cache where q = ${key} and created_at > now() - interval '30 days'`)[0]?.results;
+        const save = (key: string, results: unknown) =>
+          sql`insert into public.food_search_cache (q, results) values (${key}, ${sql.json(results as any)})
+              on conflict (q) do update set results = excluded.results, created_at = now()`;
+        if (fatsecretConfigured()) {
+          const hit = await cachedAs(`fs:${q}`);
+          if (hit?.length) return json({ results: hit, provider: "fatsecret" });
+          try {
+            const results = await searchFatsecret(q);
+            if (results.length) { await save(`fs:${q}`, results); return json({ results, provider: "fatsecret" }); }
+          } catch (e) { console.error("fatsecret search failed", (e as Error).message); }
+        }
+        const usda = await cachedAs(`usda:${q}`);
+        if (usda) return json({ results: usda, provider: "usda" });
         try {
-          const results = await searchFoods(q);
-          await sql`insert into public.food_search_cache (q, results) values (${q}, ${sql.json(results)})
-                    on conflict (q) do update set results = excluded.results, created_at = now()`;
-          return json({ results });
+          const results = await searchUsda(q);
+          await save(`usda:${q}`, results);
+          return json({ results, provider: "usda" });
         } catch (e) {
           if ((e as Error).message === "rate_limited") return json({ results: [], busy: true });
           throw e;

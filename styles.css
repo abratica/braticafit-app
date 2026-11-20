@@ -442,3 +442,5 @@ a.btn.primary { color: var(--accent-ink); }
 .s-big input { font-size: 17px; }
 .s-list { padding-top: 2px; padding-bottom: 2px; }
 .s-list .meta b { font-weight: 600; color: var(--ink); }
+.fs-attr { text-align: right; margin: 6px 2px 0; font-size: 12px; }
+.fs-attr a { color: var(--muted); }

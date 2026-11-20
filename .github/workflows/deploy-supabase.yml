@@ -16,6 +16,8 @@ jobs:
       PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       USDA_API_KEY: ${{ secrets.USDA_API_KEY }}
+      FATSECRET_CLIENT_ID: ${{ secrets.FATSECRET_CLIENT_ID }}
+      FATSECRET_CLIENT_SECRET: ${{ secrets.FATSECRET_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
@@ -80,3 +82,8 @@ jobs:
         run: |
           if [ -z "$USDA_API_KEY" ]; then echo "USDA_API_KEY not set in GitHub; leaving Supabase as is"; exit 0; fi
           supabase secrets set --project-ref "$PROJECT_REF" --yes USDA_API_KEY="$USDA_API_KEY"
+
+      - name: Connect fatsecret when the keys are set
+        run: |
+          if [ -z "$FATSECRET_CLIENT_ID" ] || [ -z "$FATSECRET_CLIENT_SECRET" ]; then echo "fatsecret keys not set; skipping"; exit 0; fi
+          supabase secrets set --project-ref "$PROJECT_REF" --yes FATSECRET_CLIENT_ID="$FATSECRET_CLIENT_ID" FATSECRET_CLIENT_SECRET="$FATSECRET_CLIENT_SECRET"

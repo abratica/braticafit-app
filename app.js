@@ -1216,9 +1216,10 @@ function openSearch() {
     <button class="btn block" id="describe" style="margin-top:14px">${ICO.type}Describe it instead</button>
     <p class="small muted" style="text-align:center;margin-top:8px">Best for mixed or homemade meals, like "burrito bowl with rice and beans".</p>`);
   const input = $("#sq", body);
-  let mine = [], hits = null, state = "idle", timer = null, seq = 0;
+  let mine = [], hits = null, state = "idle", timer = null, seq = 0, provider = null;
 
   const kcalLine = (h) => {
+    if (h.perServingOnly) return `${r0(h.per100.kcal)} cal · ${esc(h.servings[0]?.label ?? "1 serving")}`;
     const s = h.servings[0];
     return s ? `${r0((h.per100.kcal * s.grams) / 100)} cal · ${esc(s.label)}` : `${r0(h.per100.kcal)} cal · 100 g`;
   };
@@ -1241,7 +1242,8 @@ function openSearch() {
           <div class="main"><div class="name">${esc(h.name)}</div>
           <div class="meta">${h.brand ? `<b>${esc(h.brand)}</b> · ` : ""}${kcalLine(h)}</div></div>
           <div class="end">›</div>
-        </button></li>`).join("")}</ul></div>`;
+        </button></li>`).join("")}</ul></div>
+        ${provider === "fatsecret" ? `<p class="fs-attr"><a href="https://www.fatsecret.com" target="_blank" rel="noopener">Powered by fatsecret</a></p>` : ""}`;
       else if (state === "done") html += `<p class="small muted">No matches. Try fewer words, or describe it instead.</p>`;
     } else if (!my.length) html += `<p class="small muted" style="margin-top:12px">Start typing to search.</p>`;
     $("#sr", body).innerHTML = html;
@@ -1261,6 +1263,7 @@ function openSearch() {
         const r = await api("food_search", { q });
         if (my !== seq) return;
         hits = r.results ?? [];
+        provider = r.provider ?? null;
         state = r.busy ? "busy" : "done";
       } catch { if (my === seq) state = "error"; }
       if (my === seq) draw();
@@ -1283,7 +1286,8 @@ function openSearch() {
 
 // A database result: pick the serving and how many, then which meal.
 function openDbFood(hit) {
-  const opts = [...hit.servings, { label: "100 g", grams: 100 }, { label: "Grams", grams: 1, custom: true }];
+  // Foods without a gram weight are counted in servings only.
+  const opts = hit.perServingOnly ? hit.servings : [...hit.servings, { label: "100 g", grams: 100 }, { label: "Grams", grams: 1, custom: true }];
   let sel = 0;
   const body = openSheet(`
     <h2>${esc(hit.name)}</h2>
@@ -1296,7 +1300,7 @@ function openDbFood(hit) {
     <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${defaultWhen()}"></label>
     <div class="card totals" id="tot"></div>
     <button class="btn primary block" id="log">Log it</button>
-    <p class="small muted" style="text-align:center;margin-top:8px">From the USDA food database. It'll be saved to My foods too.</p>`);
+    <p class="small muted" style="text-align:center;margin-top:8px">${hit.id?.startsWith("fs:") ? `Nutrition data from <a href="https://www.fatsecret.com" target="_blank" rel="noopener">fatsecret</a>` : "From the USDA food database"}. It'll be saved to My foods too.</p>`);
   const qty = () => Math.max(0, Number($("#dq", body).value) || 0);
   const grams = () => (opts[sel].custom ? qty() : opts[sel].grams * qty());
   const draw = () => {
@@ -1325,15 +1329,15 @@ function openDbFood(hit) {
     const g = custom ? qty() : opts[sel].grams;
     const servings = custom ? 1 : qty();
     const label = custom ? `${r0(g)} g` : opts[sel].label;
-    const perGram = Object.fromEntries(KEYS.map((k) => [k, (hit.per100[k] ?? 0) / 100]));
+    const perGram = Object.fromEntries(KEYS.map((k) => [k, (hit.per100[k] ?? 0) / 100]));  // per serving-unit when perServingOnly
     const per = Object.fromEntries(KEYS.map((k) => [k, perGram[k] * g]));
     const name = hit.brand ? `${hit.name} (${hit.brand})` : hit.name;
     // Same food and serving as before? Reuse it so My foods doesn't fill with copies.
-    let { data: food } = await db.from("foods").select("*").eq("fdc_id", hit.fdcId).eq("portion_label", label).limit(1).maybeSingle();
+    let { data: food } = await db.from("foods").select("*").eq("ext_id", hit.id).eq("portion_label", label).limit(1).maybeSingle();
     if (!food) {
       const ins = await db.from("foods").insert({
-        name, portion_label: label, fdc_id: hit.fdcId, source: "search",
-        components: [{ name, portion: label, grams: g, nutrients: per, per_gram: perGram, source: "usda" }],
+        name, portion_label: label, ext_id: hit.id, source: "search",
+        components: [{ name, portion: label, grams: hit.perServingOnly ? null : g, nutrients: per, per_gram: hit.perServingOnly ? null : perGram, source: hit.id?.startsWith("fs:") ? "fatsecret" : "usda" }],
         nutrients: per, tags: [],
       }).select().single();
       if (ins.error) { $("#log", body).disabled = false; return toast(ins.error.message); }

@@ -180,12 +180,13 @@ export async function analyzeMeal(input: { image?: string; mediaType?: string; t
 // Search-as-you-type against USDA FoodData Central (generic + branded foods)
 // ---------------------------------------------------------------------------
 export type SearchHit = {
-  fdcId: number;
+  id: string;                 // "usda:123" or "fs:456"
   name: string;
   brand: string | null;
   kind: "generic" | "branded";
-  per100: Nutrients;
+  per100: Nutrients;          // per 100 g, or per one serving when perServingOnly
   servings: { label: string; grams: number }[];
+  perServingOnly?: boolean;   // no gram weight known: amounts are counted in servings
 };
 
 function per100From(food: any): Nutrients | null {
@@ -210,7 +211,7 @@ function per100From(food: any): Nutrients | null {
 const titleCase = (s: string) =>
   s.toLowerCase().replace(/(^|[\s,(/-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
 
-export async function searchFoods(q: string): Promise<SearchHit[]> {
+export async function searchUsda(q: string): Promise<SearchHit[]> {
   const key = Deno.env.get("USDA_API_KEY") || "DEMO_KEY";
   const run = async (dataType: string, pageSize: number) => {
     const url = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
@@ -251,7 +252,109 @@ export async function searchFoods(q: string): Promise<SearchHit[]> {
         servings.push({ label: `${label} (${round(g, 0)} g)`, grams: g });
       }
     }
-    hits.push({ fdcId: f.fdcId, name, brand, kind: isBranded ? "branded" : "generic", per100, servings });
+    hits.push({ id: `usda:${f.fdcId}`, name, brand, kind: isBranded ? "branded" : "generic", per100, servings });
   }
   return hits.slice(0, 25);
+}
+
+
+// ---------------------------------------------------------------------------
+// fatsecret: branded, supermarket and restaurant foods. Tried first; USDA is the fallback.
+// ---------------------------------------------------------------------------
+let fsToken: { value: string; until: number } | null = null;
+
+export function fatsecretConfigured() {
+  return !!(Deno.env.get("FATSECRET_CLIENT_ID") && Deno.env.get("FATSECRET_CLIENT_SECRET"));
+}
+
+async function fatsecretToken(): Promise<string> {
+  if (fsToken && fsToken.until > Date.now() + 60_000) return fsToken.value;
+  const id = Deno.env.get("FATSECRET_CLIENT_ID")!, secret = Deno.env.get("FATSECRET_CLIENT_SECRET")!;
+  const res = await fetch("https://oauth.fatsecret.com/connect/token", {
+    method: "POST",
+    headers: { Authorization: `Basic ${btoa(`${id}:${secret}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: "grant_type=client_credentials",   // no scope: fatsecret grants every scope this key has
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) throw new Error(`fatsecret token: ${data.error_description || data.error || res.status}`);
+  fsToken = { value: data.access_token, until: Date.now() + Number(data.expires_in ?? 3600) * 1000 };
+  return fsToken.value;
+}
+
+async function fsGet(path: string, params: Record<string, string>) {
+  const url = new URL(`https://platform.fatsecret.com/rest/${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  url.searchParams.set("format", "json");
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${await fatsecretToken()}` } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) throw new Error(`fatsecret ${path}: ${data.error?.message || res.status}`);
+  return data;
+}
+
+const arr = <T>(v: T | T[] | undefined | null): T[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+// One fatsecret serving -> our nutrients for that serving.
+function fsServingNutrients(sv: any): Nutrients {
+  const n = zero();
+  n.kcal = num(sv.calories); n.protein = num(sv.protein); n.carbs = num(sv.carbohydrate); n.fat = num(sv.fat);
+  n.sat_fat = num(sv.saturated_fat); n.fiber = num(sv.fiber); n.sugar = num(sv.sugar); n.sodium = num(sv.sodium);
+  return n;
+}
+
+function fsHit(f: any): SearchHit | null {
+  const svs = arr(f.servings?.serving);
+  if (!svs.length) return null;
+  const isBranded = String(f.food_type || "").toLowerCase() === "brand";
+  const name = String(f.food_name || "").trim();
+  const brand = isBranded ? String(f.brand_name || "").trim() || null : null;
+  const metric = svs.filter((sv) => /^(g|ml)$/i.test(String(sv.metric_serving_unit || "")) && num(sv.metric_serving_amount) > 0);
+  const kind = isBranded ? "branded" : "generic";
+  if (metric.length) {
+    // Base the per-100 g numbers on the default serving when it has a gram weight.
+    const base = metric.find((sv) => String(sv.is_default) === "1") ?? metric[0];
+    const g = num(base.metric_serving_amount);
+    const per = fsServingNutrients(base);
+    const per100 = Object.fromEntries(KEYS.map((k) => [k, (per[k] * 100) / g])) as Nutrients;
+    const servings = metric
+      .filter((sv) => !/^100\s*g$/i.test(String(sv.serving_description || "").trim()))
+      .slice(0, 6)
+      .map((sv) => ({ label: `${String(sv.serving_description).trim()} (${round(num(sv.metric_serving_amount), 0)} g)`, grams: num(sv.metric_serving_amount) }));
+    return { id: `fs:${f.food_id}`, name, brand, kind, per100, servings };
+  }
+  const sv = svs.find((x) => String(x.is_default) === "1") ?? svs[0];
+  return { id: `fs:${f.food_id}`, name, brand, kind, per100: fsServingNutrients(sv), servings: [{ label: String(sv.serving_description || "1 serving").trim(), grams: 100 }], perServingOnly: true };
+}
+
+// Basic keys only get a text summary per food ("Per 1 burger - Calories: 590kcal | Fat: 34.00g | ...").
+function fsHitFromDescription(f: any): SearchHit | null {
+  const d = String(f.food_description || "");
+  const m = d.match(/^Per\s+(.+?)\s+-\s+Calories:\s*([\d.]+)kcal\s*\|\s*Fat:\s*([\d.]+)g\s*\|\s*Carbs:\s*([\d.]+)g\s*\|\s*Protein:\s*([\d.]+)g/i);
+  if (!m) return null;
+  const isBranded = String(f.food_type || "").toLowerCase() === "brand";
+  const n = zero();
+  n.kcal = num(m[2]); n.fat = num(m[3]); n.carbs = num(m[4]); n.protein = num(m[5]);
+  const unit = m[1].trim();
+  const grams = unit.match(/^([\d.]+)\s*g$/i);
+  const base = { id: `fs:${f.food_id}`, name: String(f.food_name || "").trim(), brand: isBranded ? String(f.brand_name || "").trim() || null : null, kind: (isBranded ? "branded" : "generic") as "branded" | "generic" };
+  if (grams) {
+    const g = num(grams[1]);
+    const per100 = Object.fromEntries(KEYS.map((k) => [k, (n[k] * 100) / g])) as Nutrients;
+    return { ...base, per100, servings: g === 100 ? [] : [{ label: `${unit}`, grams: g }] };
+  }
+  return { ...base, per100: n, servings: [{ label: unit, grams: 100 }], perServingOnly: true };
+}
+
+export async function searchFatsecret(q: string): Promise<SearchHit[]> {
+  try {
+    // Premier keys: full servings with gram weights.
+    const data = await fsGet("foods/search/v3", { search_expression: q, max_results: "25", page_number: "0" });
+    const foods = arr(data.foods_search?.results?.food);
+    return foods.map(fsHit).filter(Boolean) as SearchHit[];
+  } catch (e) {
+    if (!/v3/.test((e as Error).message)) throw e;
+    // Basic keys: the original search with a one-line nutrition summary.
+    const data = await fsGet("foods/search/v1", { search_expression: q, max_results: "25", page_number: "0" });
+    return arr(data.foods?.food).map(fsHitFromDescription).filter(Boolean) as SearchHit[];
+  }
 }
