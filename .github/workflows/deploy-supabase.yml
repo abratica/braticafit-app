@@ -18,6 +18,7 @@ jobs:
       USDA_API_KEY: ${{ secrets.USDA_API_KEY }}
       FATSECRET_CLIENT_ID: ${{ secrets.FATSECRET_CLIENT_ID }}
       FATSECRET_CLIENT_SECRET: ${{ secrets.FATSECRET_CLIENT_SECRET }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
@@ -87,3 +88,11 @@ jobs:
         run: |
           if [ -z "$FATSECRET_CLIENT_ID" ] || [ -z "$FATSECRET_CLIENT_SECRET" ]; then echo "fatsecret keys not set; skipping"; exit 0; fi
           supabase secrets set --project-ref "$PROJECT_REF" --yes FATSECRET_CLIENT_ID="$FATSECRET_CLIENT_ID" FATSECRET_CLIENT_SECRET="$FATSECRET_CLIENT_SECRET"
+
+      - name: Connect Groq (voice transcripts) when the key is set
+        run: |
+          if [ -z "$GROQ_API_KEY" ]; then echo "GROQ_API_KEY not set; skipping"; exit 0; fi
+          CODE=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models)
+          echo "Groq key check: HTTP $CODE"
+          if [ "$CODE" != "200" ]; then echo "Groq rejected the key"; exit 1; fi
+          supabase secrets set --project-ref "$PROJECT_REF" --yes GROQ_API_KEY="$GROQ_API_KEY"
