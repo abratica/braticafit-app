@@ -345,14 +345,12 @@ function workoutMeta(w, nEx) {
 }
 
 // ---------------------------------------------------------------------------
-// Today (home): today's workout, quick food logging, check-ins when due, daily recap
+// Today (home): today's workout and the daily recap
 // ---------------------------------------------------------------------------
-async function renderHome(highlightId) {
+async function renderHome() {
   $("#sub").textContent = dayFmt.format(new Date());
-  const since = new Date(Date.now() - 24 * 3600e3).toISOString();
-  const [{ data: ws }, { data: pending }, { data: recaps }] = await Promise.all([
+  const [{ data: ws }, { data: recaps }] = await Promise.all([
     db.from("workouts").select("*, workout_exercises(count)").eq("scheduled_on", ymd()).order("created_at"),
-    db.from("meals").select("id,name,eaten_at,energy,stomach").gte("eaten_at", since).lte("checkin_due_at", new Date().toISOString()).is("checked_in_at", null).order("eaten_at", { ascending: false }),
     db.from("recaps").select("id").gte("recorded_at", startOfToday().toISOString()).limit(1),
   ]);
   const list = ws ?? [];
@@ -384,13 +382,6 @@ async function renderHome(highlightId) {
     <div id="install-slot"></div>
     <h3>Today's workout</h3>
     ${workout}
-    ${features.food ? `<h3>Log food</h3>
-    <div class="log-row">
-      <button class="btn" id="snap">${ICO.camera}Snap</button>
-      <button class="btn" id="scan">${ICO.scan}Scan</button>
-      <button class="btn" id="type">${ICO.search}Search</button>
-    </div>
-    ${(pending ?? []).length ? `<h3>How do you feel?</h3>${pending.map(checkinCard).join("")}` : ""}` : ""}
     <h3>Daily recap</h3>
     <button class="recap-btn" id="recap">
       <span class="recap-ico ${recapDone ? "done" : ""}">${recapDone ? ICO.check : ICO.mic}</span>
@@ -400,18 +391,8 @@ async function renderHome(highlightId) {
 
   app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
   $("#plan")?.addEventListener("click", () => openPlanner());
-  $("#snap")?.addEventListener("click", () => { logTo = { day: null, meal: null }; $("#camera").click(); });
-  $("#type")?.addEventListener("click", () => { logTo = { day: null, meal: null }; openSearch(); });
-  $("#scan")?.addEventListener("click", () => { logTo = { day: null, meal: null }; openScanner(); });
   $("#recap").addEventListener("click", openRecap);
-  bindCheckins(app, () => renderHome());
   showInstallBar();
-
-  if (highlightId) {
-    const card = app.querySelector(`[data-checkin="${highlightId}"]`);
-    if (card) { card.scrollIntoView({ block: "center" }); card.classList.add("flash"); }
-    else openMeal(highlightId);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1358,7 +1339,6 @@ async function renderProgress() {
   const t = sumNutrients(meals.map((m) => m.nutrients));
   const planned = (wks ?? []).length;
   const done = (wks ?? []).filter((w) => w.completed_at).length;
-  const checkins = meals.filter((m) => m.checked_in_at).length;
   const ws = (weights ?? []).slice().reverse();
 
   let spark = "";
@@ -1376,7 +1356,7 @@ async function renderProgress() {
       <div class="stat"><b>${planned ? `${done} of ${planned}` : done}</b><span>Workouts done</span></div>
       <div class="stat"><b>${meals.length ? `${r0(t.protein / days)}g` : "–"}</b><span>Avg protein</span></div>
       <div class="stat"><b>${meals.length ? r0(t.kcal / days).toLocaleString() : "–"}</b><span>Avg calories</span></div>
-      <div class="stat"><b>${checkins}</b><span>Check-ins</span></div>
+      <div class="stat"><b>${meals.length}</b><span>Meals logged</span></div>
     </div>
 
     ${features.weight ? `<h3>Weight</h3>
@@ -1393,7 +1373,7 @@ async function renderProgress() {
         <div class="title">${esc(o.title)}</div>
         <div class="small muted">${esc(o.short)}</div>
       </button>`).join("")
-    : `<p class="empty">Your first weekly summary arrives Sunday morning. Patterns show up once something repeats a few times in your check-ins.</p>`}` : ""}`;
+    : `<p class="empty">Your first weekly summary arrives Sunday morning. </p>`}` : ""}`;
 
   $("#wf")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1583,36 +1563,6 @@ function feelBadge(m) {
   return bits.length ? bits.join(" · ") : "";
 }
 
-function checkinCard(m) {
-  const chips = (field, list) => list.map(([k, label]) =>
-    `<button class="chip" data-field="${field}" data-val="${k}" aria-pressed="${m[field] === k}">${label}</button>`).join("");
-  return `
-    <div class="card checkin" data-checkin="${m.id}">
-      <div class="name" style="font-weight:600">${esc(m.name)}</div>
-      <div class="small muted">Eaten ${when(m.eaten_at)}</div>
-      <div class="q">Energy</div><div class="chips">${chips("energy", ENERGY)}</div>
-      <div class="q">Stomach</div><div class="chips">${chips("stomach", STOMACH)}</div>
-    </div>`;
-}
-
-function bindCheckins(root, onDone) {
-  root.querySelectorAll("[data-checkin]").forEach((card) => {
-    card.addEventListener("click", async (e) => {
-      const chip = e.target.closest(".chip");
-      if (!chip) return;
-      const id = card.dataset.checkin;
-      const field = chip.dataset.field;
-      card.querySelectorAll(`.chip[data-field="${field}"]`).forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
-      const done = card.querySelector('.chip[data-field="energy"][aria-pressed="true"]') && card.querySelector('.chip[data-field="stomach"][aria-pressed="true"]');
-      const patch = { [field]: chip.dataset.val };
-      if (done) patch.checked_in_at = new Date().toISOString();
-      const { error } = await db.from("meals").update(patch).eq("id", id);
-      if (error) return toast(error.message);
-      if (done) { toast("Got it, thanks"); setTimeout(onDone, 500); }
-    });
-  });
-}
-
 async function openMeal(id) {
   const { data: m } = await db.from("meals").select("*").eq("id", id).single();
   if (!m) return;
@@ -1629,9 +1579,7 @@ async function openMeal(id) {
     <p class="small muted">Saturated fat ${r0(n.sat_fat)}g · fiber ${r0(n.fiber)}g · sodium ${r0(n.sodium)}mg</p>
     <div class="field"><span class="muted small">Meal</span>
       <div class="seg seg-wide meal-pick" id="mv">${MEALS.map(([k, l]) => `<button type="button" data-meal="${k}" aria-pressed="${k === mealOf(m)}">${l}</button>`).join("")}</div></div>
-    ${checkinCard(m)}
     <button class="btn danger block" id="del">Delete this entry</button>`);
-  bindCheckins(body, () => { closeSheet(); go(tab); });
   $("#mv", body).addEventListener("click", async (e) => {
     const b = e.target.closest("[data-meal]");
     if (!b || b.getAttribute("aria-pressed") === "true") return;
@@ -2031,8 +1979,7 @@ async function logFood(food, servings, eatenAt, meal) {
   if (error) return toast(error.message);
   await db.from("foods").update({ times_logged: (food.times_logged ?? 0) + 1, last_logged_at: new Date().toISOString() }).eq("id", food.id);
   closeSheet();
-  const due = new Date(eatenAt.getTime() + 2 * 3600e3);
-  toast(due > new Date() ? `Logged to ${mealLabel(meal)}. I'll check in around ${timeFmt.format(due)}.` : `Logged to ${mealLabel(meal)}`);
+  toast(`Logged to ${mealLabel(meal)}`);
   foodSeg = "today";
   foodDay = ymd(eatenAt) === ymd() ? null : ymd(eatenAt);
   logTo = { day: null, meal: null };
@@ -2161,7 +2108,7 @@ async function renderSettings() {
       <button class="btn primary" id="coach-open">Open</button></div>` : ""}
     <h3>Notifications</h3>
     <div class="card">
-      <p class="small" style="margin-top:0">${isCoach ? "Check-ins about 2 hours after you eat (not between 10pm and 8am), patterns when they show up, and your Sunday summary." : "Check-ins about 2 hours after you eat (not between 10pm and 8am)."}</p>
+      <p class="small" style="margin-top:0">${isCoach ? "Messages from clients, patterns when they show up, and your Sunday summary." : "Messages from your coach."}</p>
       ${pushState === "unsupported" ? `<p class="small muted">This browser can't receive notifications. Install the app to your home screen from Chrome first.</p>`
         : pushState === "denied" ? `<p class="small muted">Notifications are blocked. Allow them in your browser's site settings for this app.</p>`
         : pushState === "on" ? `<p class="small" style="color:var(--good)">On for this device.</p><button class="btn ghost block" id="test">Send a test</button>`
@@ -2249,7 +2196,7 @@ function showInstallBar() {
   const slot = $("#install-slot");
   if (!slot || !deferredInstall || standalone()) return;
   try { if (localStorage.getItem("psh-install-x")) return; } catch {}
-  slot.innerHTML = `<div class="install-bar"><span><b>Install BraticaFit</b>Logging and check-ins from your home screen</span>
+  slot.innerHTML = `<div class="install-bar"><span><b>Install BraticaFit</b>Your workouts and coach on your home screen</span>
     <button class="btn primary" id="inst">Install</button><button class="x" id="inst-x" aria-label="Not now">×</button></div>`;
   $("#inst").addEventListener("click", async () => { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; slot.innerHTML = ""; });
   $("#inst-x").addEventListener("click", () => { try { localStorage.setItem("psh-install-x", "1"); } catch {} slot.innerHTML = ""; });
@@ -2268,7 +2215,7 @@ async function handleHash() {
   if (!h || !user || !/^(checkin|obs)=/.test(h)) return false;
   history.replaceState(null, "", location.pathname + location.search);
   const [k, v] = h.split("=");
-  if (k === "checkin" && v) { tab = "today"; markTab(); await renderHome(v); return true; }
+  if (k === "checkin" && v) { await go(features.food ? "food" : "today"); if (features.food) openMeal(v); return true; }
   if (k === "obs" && v) { tab = "progress"; markTab(); await renderProgress(); openObservation(v); return true; }
   return false;
 }

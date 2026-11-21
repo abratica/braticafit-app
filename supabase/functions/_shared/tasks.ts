@@ -12,6 +12,13 @@ const fmtWhen = (d: Date) =>
 // Check-ins: ~2 hours after each logged meal
 // ---------------------------------------------------------------------------
 export async function runCheckins() {
+  // "How do you feel?" check-ins are turned off (removed from the app). Mark anything pending so nothing sends.
+  await sql`update public.meals set checkin_pushed = true where checkin_pushed = false`;
+  return { skipped: "check-ins turned off" };
+}
+
+// Kept for reference if check-ins come back.
+export async function runCheckinsOld() {
   // Too old to ask about: retire quietly (still answerable in the app).
   await sql`update public.meals set checkin_pushed = true
             where checkin_pushed = false and eaten_at < now() - interval '6 hours'`;
