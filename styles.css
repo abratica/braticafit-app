@@ -524,3 +524,5 @@ a.btn.primary { color: var(--accent-ink); }
   .viewer-top, .viewer-video, .viewer-info { width: min(860px, 100%); box-sizing: border-box; }
   .viewer-video .player { border-radius: 12px; }
 }
+.seg-serv { display: flex; width: 100%; box-sizing: border-box; }
+.seg-serv button { flex: 1; min-width: 0; padding: 9px 0; font-variant-numeric: tabular-nums; }

@@ -1894,7 +1894,7 @@ function review(result, meta) {
     <div class="card" id="items"></div>
     ${result.note ? `<p class="small muted">${esc(result.note)}</p>` : ""}
     <div class="field"><span class="muted small">Servings</span>
-      <div class="seg" id="sv">${[0.5, 1, 1.5, 2].map((v) => `<button data-v="${v}" aria-pressed="${v === 1}">${v === 0.5 ? "½" : v === 1.5 ? "1½" : v}</button>`).join("")}</div></div>
+      <div class="seg seg-serv" id="sv">${servingButtons()}</div></div>
     ${mealPickerHtml()}
     <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${defaultWhen()}"></label>
     <div class="card totals" id="tot"></div>
@@ -2019,13 +2019,17 @@ async function renderFoods(prefix = "") {
   });
 }
 
+// Serving choices for saved foods and photo logs: ½ up to 5.
+const SERVINGS = [0.5, 1, 1.5, 2, 3, 4, 5];
+const servingButtons = () => SERVINGS.map((v) => `<button type="button" data-v="${v}" aria-pressed="${v === 1}" aria-label="${v} serving${v === 1 ? "" : "s"}">${v === 0.5 ? "½" : v === 1.5 ? "1½" : v}</button>`).join("");
+
 function openFood(food) {
   let servings = 1;
   const body = openSheet(`
     <h2>${esc(food.name)}</h2>
     <p class="muted small">${esc(food.portion_label || "")}</p>
     <div class="field"><span class="muted small">Servings</span>
-      <div class="seg" id="sv">${[0.5, 1, 1.5, 2].map((v) => `<button data-v="${v}" aria-pressed="${v === 1}">${v === 0.5 ? "½" : v === 1.5 ? "1½" : v}</button>`).join("")}</div></div>
+      <div class="seg seg-serv" id="sv">${servingButtons()}</div></div>
     ${mealPickerHtml()}
     <label class="field"><span>When</span><input class="input" id="at" type="datetime-local" value="${defaultWhen()}"></label>
     <div class="card totals" id="tot"></div>
