@@ -508,7 +508,9 @@ export function createTrain(ctx) {
       <button class="c-toggle" data-t-set="${k}" aria-pressed="${s[k]}"><span class="c-knob"></span>${s[k] ? "On" : "Off"}</button></div>`;
     return `
       <section class="c-card"><h3>What they see</h3>
-        ${sw("food", "Food logging", "The Food tab, food logging on Today, and meal check-ins.")}
+        <div class="c-setting"><div><b>App look</b><span class="c-vm">Gym is the dark look. Clarity matches braticafit.com. Takes effect next time they open the app.</span></div>
+          <span class="c-mode">${[["gym", "Gym"], ["clarity", "Clarity"]].map(([k, l]) => `<button data-t-theme="${k}" aria-pressed="${(s.theme || "gym") === k}">${l}</button>`).join("")}</span></div>
+        ${sw("food", "Food logging", "The Food tab and food logging.")}
         ${sw("weight", "Weight tracking", "Weigh-ins and the weight chart. Turn off for clients who aren't here for weight.")}
         ${sw("targets_edit", "Can change their own targets", "Off means they see the targets you set but can't edit them.")}
         ${sw("move_days", "Can move workouts", "Lets them move a workout to another day.")}
@@ -791,6 +793,15 @@ export function createTrain(ctx) {
     if (t.dataset.tDayOpen) { c.openDay = c.openDay === t.dataset.tDayOpen ? null : t.dataset.tDayOpen; return ctx.render(); }
     if (t.hasAttribute("data-t-targets")) return openTargetsForm();
     if (t.hasAttribute("data-t-assign")) { await loadProgList(); return openAssign(null, c.user_id); }
+    if (t.dataset.tTheme) {
+      const m = c.detail.member;
+      const s = { ...(m.settings ?? {}), theme: t.dataset.tTheme };
+      const { error } = await db.from("members").update({ settings: s }).eq("id", m.id);
+      if (error) return toast(error.message);
+      m.settings = s;
+      toast(`${m.name || "Client"} will see the ${t.dataset.tTheme === "clarity" ? "Clarity" : "Gym"} look`);
+      return ctx.render();
+    }
     if (t.dataset.tSet) {
       const m = c.detail.member;
       const s = settingsOf(m);

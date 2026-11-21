@@ -526,3 +526,38 @@ a.btn.primary { color: var(--accent-ink); }
 }
 .seg-serv { display: flex; width: 100%; box-sizing: border-box; }
 .seg-serv button { flex: 1; min-width: 0; padding: 9px 0; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+   "Clarity" theme: the braticafit.com look (off-white, ink, blue; Playfair titles).
+   Same layout and wording as the default; only the look changes. Set per client by the coach.
+   --------------------------------------------------------------------------- */
+:root[data-theme="clarity"] {
+  --bg: #F9F9F8; --card: #FFFFFF; --ink: #0F0F0E; --muted: #6B6B66; --line: #E8E8E4;
+  --accent: #2563EB; --accent-ink: #FFFFFF; --chip: #F1F1EE; --warn: #B45309; --good: #15803D;
+  --display: Inter, system-ui, sans-serif; --serif: "Playfair Display", Georgia, serif;
+  --texture: none; color-scheme: light;
+}
+[data-theme="clarity"] body { background-image: none; }
+[data-theme="clarity"] .wordmark { filter: brightness(0); }
+/* Titles in Playfair, sentence case */
+[data-theme="clarity"] h2, [data-theme="clarity"] .w-title, [data-theme="clarity"] .call-title, [data-theme="clarity"] .viewer-top b {
+  font-family: var(--serif); font-weight: 700; text-transform: none; letter-spacing: 0;
+}
+[data-theme="clarity"] .w-title { font-size: 22px; }
+/* Buttons and status lines in Inter, sentence case */
+[data-theme="clarity"] .btn.primary, [data-theme="clarity"] .done-line, [data-theme="clarity"] .row .go, [data-theme="clarity"] #iv .iv-ctl button {
+  text-transform: none; letter-spacing: 0; font-family: Inter, sans-serif;
+}
+[data-theme="clarity"] .btn.primary { border-radius: 999px; box-shadow: 0 4px 14px rgba(37,99,235,.22); }
+[data-theme="clarity"] .bottom-nav { background: rgba(255,255,255,.96); }
+[data-theme="clarity"] .bottom-nav button { text-transform: none; letter-spacing: 0; font-weight: 500; }
+[data-theme="clarity"] .composer { background: rgba(249,249,248,.97); }
+[data-theme="clarity"] .toast, [data-theme="clarity"] #toast { color: #FFFFFF; }
+[data-theme="clarity"] .play { background: rgba(37,99,235,.94); }
+[data-theme="clarity"] .mic-big[aria-pressed="true"] { animation-name: pulse-blue; }
+@keyframes pulse-blue { 0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,.45); } 50% { box-shadow: 0 0 0 14px rgba(37,99,235,0); } }
+[data-theme="clarity"] .mbar.over .mbar-track div { background: repeating-linear-gradient(45deg, var(--accent) 0 6px, rgba(37,99,235,.55) 6px 12px); }
+[data-theme="clarity"] #restbar .rb-fill { background: rgba(37,99,235,.12); }
+[data-theme="clarity"] #restbar { box-shadow: 0 10px 30px rgba(15,15,14,.12); }
+[data-theme="clarity"] .seg button[aria-pressed="true"] { box-shadow: 0 1px 3px rgba(15,15,14,.12); }
+[data-theme="clarity"] .vthumb .tag, [data-theme="clarity"] .vthumb .dur { color: #FFFFFF; }

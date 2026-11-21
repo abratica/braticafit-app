@@ -1,7 +1,7 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
-import { createTrain } from "./coach-train.js?v=5";
+import { createTrain } from "./coach-train.js?v=6";
 import { createInbox } from "./coach-inbox.js?v=2";
 
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";

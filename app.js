@@ -125,6 +125,7 @@ $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-close
 // Sign in (6-digit email code)
 // ---------------------------------------------------------------------------
 function renderSignIn() {
+  delete document.documentElement.dataset.theme;  // sign-in looks the same for everyone
   $("#tabs").hidden = true;
   $("#settings").hidden = true;
   document.body.classList.add("signin");
@@ -2227,7 +2228,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=11");
+    const m = await import("./coach.js?v=12");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
@@ -2264,11 +2265,22 @@ async function enter(session) {
     Object.assign(features, s ?? {});
   }
   $('#tabs button[data-tab="food"]').hidden = !features.food;
+  applyTheme(isCoach ? "gym" : features.theme);
   claimThisDevice();
   $("#tabs").hidden = false;
   $("#settings").hidden = false;
   if (!(await handleHash())) await go(tab);
   refreshDot();
+}
+
+// The look the coach picked for this client: "gym" (default, dark) or "clarity" (the braticafit.com look).
+function applyTheme(theme) {
+  const t = theme === "clarity" ? "clarity" : "gym";
+  if (t === "clarity") document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === "clarity" ? "#F9F9F8" : "#0d0d0d";
+  try { localStorage.setItem("bf-theme", t); } catch {}
 }
 
 // If this device already gets notifications, point them at whoever is signed in now.
