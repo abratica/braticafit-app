@@ -1,6 +1,7 @@
 // Scheduled jobs, called by pg_cron with a shared secret.
 import { getConfig } from "../_shared/db.ts";
 import { runCheckins, runNotify, runPatterns, runWeekly } from "../_shared/tasks.ts";
+import { runCalls } from "../_shared/calls.ts";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -16,6 +17,7 @@ Deno.serve(async (req) => {
       case "patterns": return json(await runPatterns());
       case "notify":   return json(await runNotify());
       case "weekly":   return json(await runWeekly({ notify: true }));
+      case "calls":    return json(await runCalls());
       default:         return json({ error: "unknown task" }, 400);
     }
   } catch (e) {

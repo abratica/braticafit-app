@@ -6,6 +6,7 @@ import { vapidKeys, pushToUser } from "../_shared/push.ts";
 import { runWeekly } from "../_shared/tasks.ts";
 import { sql, ownerId } from "../_shared/db.ts";
 import { groqConfigured, suggestVideos, transcribe } from "../_shared/voice.ts";
+import { joinCall, processCalls } from "../_shared/calls.ts";
 import { APP_URL, COACH_INBOX, DEFAULT_WELCOME, emailConfigured, renderAccessRequest, renderWelcome, sendEmail } from "../_shared/email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "https://ktpztiyqyoalrwnqtqme.supabase.co";
@@ -222,6 +223,18 @@ Deno.serve(async (req) => {
         }
         await Promise.allSettled(tasks);
         return json({ ok: true });
+      }
+      case "call_join": {
+        // Room + join pass for a booked call (clients: only their own, after the one-time OK to record).
+        const r = await joinCall(String(body.call_id ?? ""), me);
+        return json(r, (r as any).error ? 400 : 200);
+      }
+      case "call_done": {
+        // The coach just left a call: try writing the notes now (the 5-minute job retries if the transcript isn't ready).
+        if (me.role !== "coach") return json({ ok: true });
+        const id = String(body.call_id ?? "");
+        await new Promise((res) => setTimeout(res, 8000));
+        return json({ ok: true, result: await processCalls(id) });
       }
       default:
         return json({ error: "unknown action" }, 400);

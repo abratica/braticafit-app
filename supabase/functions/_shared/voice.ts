@@ -158,31 +158,54 @@ async function candidates(text: string, recentNames: string[]): Promise<Cand[]> 
 // Groq retires models now and then, so pick the best one it currently offers.
 const PREFER = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct",
   "qwen/qwen3-32b", "meta-llama/llama-4-scout-17b-16e-instruct", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
-let modelCache: { id: string; at: number } | null = null;
-export async function chatModel(): Promise<string> {
-  if (modelCache && Date.now() - modelCache.at < 6 * 3600e3) return modelCache.id;
+// For long inputs (call transcripts), models with the most room per minute on Groq's free plan go first.
+const PREFER_BIG = ["meta-llama/llama-4-scout-17b-16e-instruct", "openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b",
+  "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "llama-3.1-8b-instant"];
+let modelCache: { ids: string[]; at: number } | null = null;
+async function liveModels(): Promise<string[]> {
+  if (modelCache && Date.now() - modelCache.at < 6 * 3600e3) return modelCache.ids;
   const r = await fetch(`${GROQ}/models`, { headers: { Authorization: `Bearer ${groqKey()}` } });
   const ids: string[] = r.ok ? ((await r.json()).data ?? []).filter((m: any) => m.active !== false).map((m: any) => m.id) : [];
-  const id = PREFER.find((p) => ids.includes(p))
-    ?? ids.find((i) => !/whisper|tts|guard|playai|orpheus|distil|compound|prompt/i.test(i)) ?? PREFER[0];
-  modelCache = { id, at: Date.now() };
-  return id;
+  if (ids.length) modelCache = { ids, at: Date.now() };
+  return ids;
+}
+export async function chatModels(big = false): Promise<string[]> {
+  const ids = await liveModels();
+  const order = (big ? PREFER_BIG : PREFER).filter((p) => ids.includes(p));
+  const extra = ids.find((i) => !/whisper|tts|guard|playai|orpheus|distil|compound|prompt/i.test(i));
+  return order.length ? order : [extra ?? PREFER[0]];
+}
+export async function chatModel(): Promise<string> {
+  return (await chatModels())[0];
+}
+
+// JSON answer from a Groq model. If a model says the request is too big or it's busy, try the next one.
+export async function groqChat(system: string, user: string, { big = false, maxTokens = 1500 } = {}): Promise<any> {
+  const models = (await chatModels(big)).slice(0, 4);
+  let last = "";
+  for (const model of models) {
+    const r = await fetch(`${GROQ}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${groqKey()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, temperature: 0.2, max_tokens: maxTokens,
+        ...(/gpt-oss/.test(model) ? { reasoning_effort: "low" } : /qwen3/.test(model) ? { reasoning_format: "hidden" } : {}),
+        response_format: { type: "json_object" },
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      }),
+    });
+    if (r.ok) {
+      try { return JSON.parse((await r.json()).choices?.[0]?.message?.content ?? "{}"); }
+      catch { last = `${model}: bad JSON`; continue; }
+    }
+    last = `${model} ${r.status}: ${(await r.text()).slice(0, 160)}`;
+    if (![400, 413, 429, 498, 500, 503].includes(r.status)) break;
+  }
+  throw new Error(`groq chat failed: ${last}`);
 }
 
 export async function groqJson(system: string, user: string): Promise<any> {
-  const model = await chatModel();
-  const r = await fetch(`${GROQ}/chat/completions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${groqKey()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model, temperature: 0.2, max_tokens: 1500,
-      ...(/gpt-oss/.test(model) ? { reasoning_effort: "low" } : /qwen3/.test(model) ? { reasoning_format: "hidden" } : {}),
-      response_format: { type: "json_object" },
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
-    }),
-  });
-  if (!r.ok) throw new Error(`groq chat ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  return JSON.parse((await r.json()).choices?.[0]?.message?.content ?? "{}");
+  return await groqChat(system, user);
 }
 
 export const SYSTEM = `You help a personal trainer answer a client's message. Pick up to 3 videos from the catalog that the trainer could send back to genuinely help with what the client said: an education video that explains why something feels the way it does, a demo whose coaching cue fixes the problem, an easier or joint-friendlier swap if something hurt, or a mobility drill for tightness.
