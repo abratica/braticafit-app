@@ -343,6 +343,8 @@ const ICO = {
   back: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>`,
   send: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+  chevL: `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>`,
+  chevR: `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>`,
   camera: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   scan: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5h3M17 5h3v2M20 17v2h-3M7 19H4v-2M8 9v6M11 9v6M14 9v6M16.5 9v6"/></svg>`,
   type: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg>`,
@@ -469,23 +471,29 @@ function openRecap() {
 // ---------------------------------------------------------------------------
 // Train: this week, the plan, past workouts
 // ---------------------------------------------------------------------------
+let trainMon = null, trainDay = null;  // the week and day being looked at in Train
 async function renderTrain() {
-  const mon = weekStart();
+  if (!trainMon) { trainMon = weekStart(); trainDay = ymd(); }
+  const mon = trainMon;
   const sun = addDays(mon, 6);
+  const thisMon = weekStart();
+  const weeksAway = Math.round((mon - thisMon) / (7 * 864e5));
   $("#sub").textContent = `Week of ${shortFmt.format(mon)}`;
   const [{ data: week }, { data: past }] = await Promise.all([
     db.from("workouts").select("*, workout_exercises(count)").gte("scheduled_on", ymd(mon)).lte("scheduled_on", ymd(sun)).order("scheduled_on").order("created_at"),
-    db.from("workouts").select("*").not("completed_at", "is", null).lt("scheduled_on", ymd(mon)).order("scheduled_on", { ascending: false }).limit(8),
+    db.from("workouts").select("*").not("completed_at", "is", null).lt("scheduled_on", ymd(thisMon)).order("scheduled_on", { ascending: false }).limit(8),
   ]);
+  if (tab !== "train") return;
   const ws = week ?? [];
   const today = ymd();
+  if (trainDay < ymd(mon) || trainDay > ymd(sun)) trainDay = ymd(mon);
   const strip = Array.from({ length: 7 }, (_, i) => {
     const d = addDays(mon, i);
     const key = ymd(d);
     const items = ws.filter((w) => w.scheduled_on === key);
     const done = items.length && items.every((w) => w.completed_at);
     const mark = done ? `<span class="wk-mark on">${ICO.check}</span>` : items.length ? `<span class="wk-dot"></span>` : `<span class="wk-mark"></span>`;
-    return `<div class="wk-day ${key === today ? "today" : ""}"><span class="wk-dow">${wdayFmt.format(d).slice(0, 1)}</span><b>${d.getDate()}</b>${mark}</div>`;
+    return `<button type="button" class="wk-day ${key === trainDay ? "sel" : ""} ${key === today ? "is-today" : ""}" data-day="${key}" aria-pressed="${key === trainDay}" aria-label="${dayFmt.format(d)}${items.length ? `, ${items.length} workout${items.length === 1 ? "" : "s"}` : ""}"><span class="wk-dow">${wdayFmt.format(d).slice(0, 1)}</span><b>${d.getDate()}</b>${mark}</button>`;
   }).join("");
 
   const planRow = (w) => {
@@ -497,27 +505,50 @@ async function renderTrain() {
       <div class="main"><div class="name">${esc(w.title)}</div><div class="meta">${workoutMeta(w, nEx)} · ${w.completed_at ? `done ${when}` : when}${w.time_of_day ? ` · ${w.time_of_day}` : ""}</div></div>
       <div class="end">${end}</div></button></li>`;
   };
+  const dayItems = ws.filter((w) => w.scheduled_on === trainDay);
+  const weekLabel = weeksAway === 0 ? "This week" : weeksAway === 1 ? "Next week" : weeksAway === -1 ? "Last week"
+    : `${shortFmt.format(mon)} – ${shortFmt.format(sun)}`;
 
   app.innerHTML = `
-    <h3>This week</h3>
-    <div class="wk">${strip}</div>
-    ${ws.length ? `<div class="card" style="margin-top:12px;padding-top:4px;padding-bottom:4px"><ul class="list">${ws.map(planRow).join("")}</ul></div>`
-      : `<p class="empty">Nothing planned this week yet.</p>`}
+    <div class="wk-nav">
+      <button type="button" class="wk-arrow" id="wk-prev" aria-label="Previous week">${ICO.chevL}</button>
+      <h3>${weekLabel}</h3>
+      ${weeksAway !== 0 || trainDay !== today ? `<button type="button" class="wk-today" id="wk-today">Today</button>` : ""}
+      <button type="button" class="wk-arrow" id="wk-next" aria-label="Next week">${ICO.chevR}</button>
+    </div>
+    <div class="wk" id="wk">${strip}</div>
+    <h3>${trainDay === today ? "Today" : dayFmt.format(fromYmd(trainDay))}</h3>
+    ${dayItems.length ? `<div class="card" style="padding-top:4px;padding-bottom:4px"><ul class="list">${dayItems.map(planRow).join("")}</ul></div>`
+      : `<p class="empty">Nothing planned for this day.</p>`}
     <button class="btn ghost block" id="plan" style="margin-top:10px">${ICO.plus}Plan a workout</button>
     ${(past ?? []).length ? `<h3>Past workouts</h3><div class="card" style="padding-top:4px;padding-bottom:4px"><ul class="list">${past.map((w) => `
       <li><button class="row" data-open="${w.id}"><div class="main"><div class="name">${esc(w.title)}</div>
       <div class="meta">${dayFmt.format(fromYmd(w.scheduled_on))}${w.duration_min ? ` · ${w.duration_min} min` : ""}</div></div>
       <div class="end">${w.feel ? feelLabel(FEEL, w.feel) : ""}</div></button></li>`).join("")}</ul></div>` : ""}`;
   app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
-  $("#plan").addEventListener("click", () => openPlanner());
+  app.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => { trainDay = b.dataset.day; renderTrain(); }));
+  const shift = (n) => { trainMon = addDays(trainMon, 7 * n); trainDay = ymd(trainMon); renderTrain(); };
+  $("#wk-prev").addEventListener("click", () => shift(-1));
+  $("#wk-next").addEventListener("click", () => shift(1));
+  $("#wk-today")?.addEventListener("click", () => { trainMon = weekStart(); trainDay = ymd(); renderTrain(); });
+  // Swipe the day strip left or right to change weeks.
+  let x0 = null;
+  const strip$ = $("#wk");
+  strip$.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  strip$.addEventListener("touchend", (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if (Math.abs(dx) > 50) shift(dx < 0 ? 1 : -1);
+  });
+  $("#plan").addEventListener("click", () => openPlanner(trainDay));
 }
 
 // Plan a workout (until the Coach app exists, you plan your own)
-function openPlanner() {
+function openPlanner(day = ymd()) {
   let kind = "video";
   const body = openSheet(`
     <h2>Plan a workout</h2>
-    <label class="field"><span>Day</span><input class="input" id="pd" type="date" value="${ymd()}"></label>
+    <label class="field"><span>Day</span><input class="input" id="pd" type="date" value="${day}"></label>
     <label class="field"><span>Name</span><input class="input" id="pt" placeholder="Lower body strength" required></label>
     <div class="field"><span class="muted small">Type</span>
       <div class="seg seg-wide" id="pk"><button data-v="video" aria-pressed="true">Video</button><button data-v="written" aria-pressed="false">Written</button></div></div>

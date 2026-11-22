@@ -302,15 +302,18 @@ textarea.input { resize: vertical; line-height: 1.45; }
 
 /* Week strip */
 .wk { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
-.wk-day { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 0; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
-.wk-day.today { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wk-day { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 0; border-radius: 10px; background: var(--card); border: 1px solid var(--line); color: var(--ink); font: inherit; cursor: pointer; min-height: 64px; }
+.wk-day.is-today { border: 2px solid var(--accent); padding: 7px 0; }
+.wk-day.is-today b { color: var(--accent); }
+.wk-day.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wk-day.sel b { color: #fff; }
 .wk-dow { font: 500 11px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; opacity: .85; }
 .wk-day b { font-size: 16px; }
 .wk-mark { height: 14px; color: var(--accent); }
-.wk-day.today .wk-mark { color: #fff; }
+.wk-day.sel .wk-mark { color: #fff; }
 .wk-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
 .wk-dot { width: 6px; height: 6px; margin: 4px 0; border-radius: 50%; background: var(--muted); }
-.wk-day.today .wk-dot { background: #fff; }
+.wk-day.sel .wk-dot { background: #fff; }
 .ico-box { flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--chip); color: var(--muted); display: grid; place-items: center; }
 .ico-box svg, .row .ok svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .row .ok { color: var(--accent); }
@@ -564,3 +567,9 @@ a.btn.primary { color: var(--accent-ink); }
 [data-theme="clarity"] #restbar { box-shadow: 0 10px 30px rgba(15,15,14,.12); }
 [data-theme="clarity"] .seg button[aria-pressed="true"] { box-shadow: 0 1px 3px rgba(15,15,14,.12); }
 [data-theme="clarity"] .vthumb .tag, [data-theme="clarity"] .vthumb .dur { color: #FFFFFF; }
+
+/* Train: week paging */
+.wk-nav { display: flex; align-items: center; gap: 8px; margin: 18px 0 10px; }
+.wk-nav h3 { flex: 1; margin: 0; }
+.wk-arrow { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+.wk-today { flex: none; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--accent); background: none; color: var(--accent); font: 600 13px Inter, sans-serif; cursor: pointer; }
