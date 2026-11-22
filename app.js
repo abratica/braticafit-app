@@ -103,6 +103,29 @@ function squareThumb(img, size = 160) {
 }
 
 // ---------------------------------------------------------------------------
+// Phone Back button: close whatever is on top (video, panel, coach mode, workout, day, tab)
+// instead of leaving the app. One spare history entry catches each Back press.
+// ---------------------------------------------------------------------------
+function armBack() { if (!history.state?.bfGuard) history.pushState({ bfGuard: true }, ""); }
+function backOne() {
+  if (viewerOpen) { closeViewer(); return true; }
+  if (!$("#sheet").hidden) { closeSheet(); return true; }
+  const ev = new CustomEvent("bf-back", { cancelable: true });   // coach mode and its overlays
+  window.dispatchEvent(ev);
+  if (ev.defaultPrevented) return true;
+  if (document.getElementById("iv")) return false;                // interval timer: has its own controls
+  if (sessionBack) { stopRest(); go(sessionBack, true); return true; }
+  if (tab === "food" && foodDay) { foodDay = null; renderFood(); return true; }
+  if (tabTrail.length) { go(tabTrail.pop(), true); return true; }
+  return false;
+}
+window.addEventListener("popstate", () => {
+  if (!user) return;
+  if (backOne()) armBack();
+  else history.back();   // nothing left to close: leave the app as normal
+});
+
+// ---------------------------------------------------------------------------
 // Sheet (bottom modal)
 // ---------------------------------------------------------------------------
 function openSheet(html) {
@@ -199,8 +222,11 @@ function renderSignIn() {
 // Navigation
 // ---------------------------------------------------------------------------
 const VIEWS = { today: renderHome, train: renderTrain, food: renderFood, progress: renderProgress, coach: renderCoach, settings: renderSettings };
-function go(next) {
+let tabTrail = [], sessionBack = null;  // for the phone's Back button
+function go(next, fromBack = false) {
   if (next === "food" && !features.food) next = "today";
+  if (!fromBack && next !== tab && user) { tabTrail.push(tab); if (tabTrail.length > 20) tabTrail.shift(); }
+  sessionBack = null;
   tab = next;
   document.body.classList.remove("has-composer");
   for (const b of document.querySelectorAll("#tabs button")) {
@@ -278,7 +304,7 @@ function demoFor(id) {
   const e = id && pnMap?.get(id);
   return e && e[demoVer] ? "vm:" + e[demoVer] : id;
 }
-let viewerOpen = false, viewerPushed = false;
+let viewerOpen = false;
 function openViewer(id, { title = "", start = 0 } = {}) {
   let v = $("#viewer");
   if (!v) {
@@ -312,7 +338,6 @@ function openViewer(id, { title = "", start = 0 } = {}) {
   v.hidden = false;
   viewerOpen = true;
   document.body.style.overflow = "hidden";
-  if (!viewerPushed) { history.pushState({ bfViewer: true }, ""); viewerPushed = true; }
   pnLookup(id).then((e) => {
     if (!e || !viewerOpen) return;
     const steps = String(e.cues || "").split(/\s*\d+\.\s+/).map((x) => x.trim()).filter(Boolean);
@@ -328,9 +353,7 @@ function closeViewer(fromBack = false) {
   v.hidden = true;
   v.innerHTML = "";
   if ($("#sheet").hidden) document.body.style.overflow = "";
-  if (viewerPushed) { viewerPushed = false; if (!fromBack) history.back(); }
 }
-window.addEventListener("popstate", () => { if (viewerOpen) closeViewer(true); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && viewerOpen) closeViewer(); });
 
 const ICO = {
@@ -643,6 +666,7 @@ function parseExercises(text) {
 // ---------------------------------------------------------------------------
 async function openSession(id) {
   const back = tab === "today" ? "today" : "train";
+  sessionBack = back;
   const [{ data: w }, { data: exs }] = await Promise.all([
     db.from("workouts").select("*").eq("id", id).single(),
     db.from("workout_exercises").select("*").eq("workout_id", id).order("position"),
@@ -722,7 +746,7 @@ async function openSession(id) {
       <input class="input" id="mv-day" type="date" value="${w.scheduled_on}"></label><button class="btn ghost" id="mv-go">Move</button></div>` : ""}
     ${isCoach || !w.assigned ? `<button class="btn danger block" id="del-w" style="margin-top:10px">Delete workout</button>` : ""}`;
 
-  $("#back").addEventListener("click", () => { stopRest(); go(back); });
+  $("#back").addEventListener("click", () => { stopRest(); go(back, true); });
   app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openViewer(b.dataset.demo, { title: b.dataset.name || "Demo" })));
 
   const timers = {};
@@ -2269,7 +2293,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=12");
+    const m = await import("./coach.js?v=13");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
@@ -2314,6 +2338,7 @@ async function enter(session) {
   $("#tabs").hidden = false;
   $("#settings").hidden = false;
   if (!(await handleHash())) await go(tab);
+  armBack();
   refreshDot();
 }
 

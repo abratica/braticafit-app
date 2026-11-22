@@ -1,7 +1,7 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
-import { createTrain } from "./coach-train.js?v=6";
+import { createTrain } from "./coach-train.js?v=7";
 import { createInbox } from "./coach-inbox.js?v=2";
 
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
@@ -742,7 +742,24 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
   const onKey = (e) => { if (e.key === "Escape") closePlayer(); };
   document.addEventListener("keydown", onKey);
 
+  // Phone Back button: close the top thing in coach mode, then coach mode itself.
+  function onBack(e) {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    const m = root.querySelector("#c-modal");
+    if (m && !m.hidden) return closePlayer();
+    const box = document.querySelector("body > .c-modal");
+    if (box) return box.querySelector("[data-x]")?.click();
+    if (st.view === "inbox" && st.inbox?.open && window.innerWidth <= 800) { st.inbox.open = null; return render(); }
+    if (st.view === "client") { st.view = "clients"; return render(); }
+    if (st.view === "programs" && st.prog) { st.prog = null; return render(); }
+    if (st.view !== "dashboard") { st.view = "dashboard"; return render(); }
+    close();
+  }
+  window.addEventListener("bf-back", onBack);
+
   function close() {
+    window.removeEventListener("bf-back", onBack);
     document.removeEventListener("keydown", onKey);
     inbox.stop();
     root.remove();

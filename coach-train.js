@@ -105,7 +105,9 @@ export function createTrain(ctx) {
     el.setAttribute("aria-modal", "true");
     document.body.appendChild(el);
     document.body.style.overflow = "hidden";
-    const close = () => { el.remove(); document.body.style.overflow = ""; document.removeEventListener("keydown", onKey); };
+    const onBack = (e) => { e.preventDefault(); e.stopImmediatePropagation(); close(); };
+    window.addEventListener("bf-back", onBack, true);   // phone Back closes the builder first
+    const close = () => { el.remove(); document.body.style.overflow = ""; document.removeEventListener("keydown", onKey); window.removeEventListener("bf-back", onBack, true); };
     const onKey = (e) => { if (e.key === "Escape" && !el.querySelector(":focus-visible.bb-name")) close(); };
     document.addEventListener("keydown", onKey);
 
