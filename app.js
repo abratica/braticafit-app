@@ -255,6 +255,7 @@ const fromYmd = (s) => new Date(`${s}T12:00:00`);
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const weekStart = (d = new Date()) => { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
 const shortFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const longDayFmt = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" });
 const wdayFmt = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const callFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 
@@ -503,7 +504,7 @@ async function renderTrain() {
   const sun = addDays(mon, 6);
   const thisMon = weekStart();
   const weeksAway = Math.round((mon - thisMon) / (7 * 864e5));
-  $("#sub").textContent = `Week of ${shortFmt.format(mon)}`;
+  $("#sub").innerHTML = `Week of<span class="sub-2">${longDayFmt.format(mon)}</span>`;
   const [{ data: week }, { data: past }] = await Promise.all([
     db.from("workouts").select("*, workout_exercises(count)").gte("scheduled_on", ymd(mon)).lte("scheduled_on", ymd(sun)).order("scheduled_on").order("created_at"),
     db.from("workouts").select("*").not("completed_at", "is", null).lt("scheduled_on", ymd(thisMon)).order("scheduled_on", { ascending: false }).limit(8),
