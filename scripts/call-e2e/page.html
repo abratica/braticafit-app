@@ -1,0 +1,11 @@
+<!doctype html><html><body style="margin:0;height:100vh"><div id="s" style="height:100vh"></div>
+<script src="https://unpkg.com/@daily-co/daily-js@0/dist/daily-iframe.js"></script>
+<script>
+window.log = [];
+const p = new URLSearchParams(location.search);
+const f = Daily.createFrame(document.getElementById("s"), { iframeStyle: { width: "100%", height: "100%", border: "0" } });
+for (const ev of ["joined-meeting", "left-meeting", "transcription-started", "transcription-stopped", "transcription-error", "error", "nonfatal-error"])
+  f.on(ev, (e) => window.log.push(ev + " " + JSON.stringify(e?.errorMsg || e?.error || e?.type || "")));
+window.leave = () => f.leave();
+f.join({ url: p.get("url"), token: p.get("token") }).catch((e) => window.log.push("join failed " + e));
+</script></body></html>

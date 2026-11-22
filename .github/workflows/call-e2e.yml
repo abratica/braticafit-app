@@ -1,0 +1,36 @@
+name: Test call notes end to end
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["scripts/call-e2e/**", ".github/workflows/call-e2e.yml"]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Make a recorded voice
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng ffmpeg >/dev/null
+          espeak-ng -s 150 -w /tmp/raw.wav "Hey Kate, thanks for jumping on. So this week you got three of your four workouts in, which is great. You said your left knee felt off on the split squats, so let's swap those for goblet box squats on Lower A. Keep the weight at twenty five pounds for now. Your protein has been around one hundred grams a day and I'd like to get that to one hundred thirty, so add a protein shake after your workouts. Before next week, film one set of the box squats and send it to me in the app. I'll update your program tonight. Talk to you next Saturday."
+          ffmpeg -loglevel error -i /tmp/raw.wav -af "apad=pad_dur=3" -ar 48000 -ac 1 /tmp/talk.wav
+      - name: Join a real call and pull the transcript
+        env:
+          DAILY_API_KEY: ${{ secrets.DAILY_API_KEY }}
+        working-directory: scripts/call-e2e
+        run: |
+          npm init -y >/dev/null && npm i -s playwright@1 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          (python3 -m http.server 8790 >/dev/null 2>&1 &)
+          sleep 1
+          node run.mjs
+      - name: Write the notes
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SUPABASE_DB_URL: postgres://unused@localhost/unused
+        run: deno run --allow-net --allow-env --allow-read scripts/call-e2e/notes.ts
