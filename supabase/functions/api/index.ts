@@ -229,6 +229,15 @@ Deno.serve(async (req) => {
         const r = await joinCall(String(body.call_id ?? ""), me);
         return json(r, (r as any).error ? 400 : 200);
       }
+      case "call_booked": {
+        // Let the client know a call was booked or moved.
+        if (me.role !== "coach") return json({ ok: true });
+        const [c] = await sql`select user_id, starts_at, title from public.calls where id = ${body.call_id ?? null}`;
+        if (!c) return json({ ok: true });
+        const at = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(c.starts_at));
+        await pushToUser(c.user_id, { title: body.moved ? "Call moved" : "Call booked", body: `${c.title} with Andrew: ${at}`, url: "./#msg", tag: `call-${body.call_id}` });
+        return json({ ok: true });
+      }
       case "call_done": {
         // The coach just left a call: try writing the notes now (the 5-minute job retries if the transcript isn't ready).
         if (me.role !== "coach") return json({ ok: true });

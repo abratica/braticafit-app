@@ -413,7 +413,8 @@ export function createTrain(ctx) {
         <div class="c-head-act"><button class="btn ghost" data-t-assign>Assign program</button><button class="btn primary" data-t-add="${todayStr()}">${SVG('<path d="M12 5v14M5 12h14"/>', 18)}Add workout</button></div></header>
       <div class="c-tabs">${tabs.map(([k, l]) => `<button data-t-tab="${k}" aria-current="${c.tab === k ? "page" : "false"}">${l}</button>`).join("")}</div>`;
     const body = { overview: overviewTab, training: trainingTab, nutrition: nutritionTab, settings: settingsTab }[c.tab]?.(d) ?? "";
-    return head + body;
+    const calls = c.tab === "overview" && !c.is_me && st.callsUI ? await st.callsUI.clientSection(c.user_id) : "";
+    return head + body + calls;
   }
 
   function overviewTab(d) {

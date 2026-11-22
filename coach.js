@@ -1,8 +1,9 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
-import { createTrain } from "./coach-train.js?v=7";
+import { createTrain } from "./coach-train.js?v=8";
 import { createInbox } from "./coach-inbox.js?v=2";
+import { createCalls } from "./coach-calls.js?v=1";
 
 const DATA = "https://raw.githubusercontent.com/abratica/youtube-summaries/coach-data/";
 const PAGE = 60;
@@ -110,7 +111,7 @@ const IC = {
 export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=9"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=10"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");
@@ -175,18 +176,11 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     else if (st.view === "client" && st.client) root.innerHTML = shell(await train.clientView());
     else if (st.view === "programs") root.innerHTML = shell(await train.programsView());
     else if (st.view === "inbox") root.innerHTML = shell(await inbox.view());
-    else root.innerHTML = shell(soon());
+    else if (st.view === "calls") root.innerHTML = shell(await calls.view());
+    else root.innerHTML = shell(await dashboard());
     root.scrollTop = 0;
     const msgs = root.querySelector("#ib-msgs");
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  function soon() {
-    const what = {
-      calls: ["Calls", "Scheduled video calls with reminders and Join inside the app."] }[st.view];
-    return `<header class="c-head"><div><p class="c-eyebrow">Next up</p><h1>${what[0]}</h1></div></header>
-      <section class="c-card c-empty"><p>${what[1]}</p><p class="muted">This part isn't built yet.</p>
-      <button class="btn primary" data-nav="inbox">${SVG(IC.inbox, 18)}Go to the Inbox</button></section>`;
   }
 
   // ---------- clients ----------
@@ -350,7 +344,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
         <section class="c-card grow"><h3>Needs attention</h3>
           ${flags.length ? `<ul class="c-flags">${flags.slice(0, 8).map(([p, why]) => `<li><button class="c-namelink" data-open-client="${p.user_id}">${esc(p.name)}</button><span>${esc(why)}</span></li>`).join("")}</ul>`
             : `<p class="c-empty-line">${clientsOnly.length ? "Nobody's slipping right now." : "No clients yet. Once clients are in, anyone who misses workouts, goes quiet, or stops logging food shows up here."}</p>`}</section>
-        <section class="c-card"><h3>Today's calls</h3><p class="c-empty-line">No calls scheduled.</p></section>
+        ${await calls.todayCard()}
       </div>
       <section class="c-card"><h3>This week</h3>
         <div class="c-week-scroll"><div class="c-week wide">
@@ -612,6 +606,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     if (!t) return;
     if (t.dataset.close !== undefined) return closePlayer();
     if (await inbox.onClick(t)) return;
+    if (await calls.onClick(t)) return;
     if (t.hasAttribute("data-exit")) return close();
     if (t.dataset.nav) {
       st.view = t.dataset.nav; if (st.view === "programs") st.prog = null;
@@ -769,6 +764,8 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
 
   const train = createTrain({ db, esc, toast, SVG, IC, st, root, render, ago, user });
   const inbox = createInbox({ db, esc, toast, SVG, IC, st, root, api, thumbOf, openPlayer, loadPN, loadChannel });
+  const calls = createCalls({ db, esc, toast, SVG, IC, st, api, render, user });
+  st.callsUI = calls;
   root.innerHTML = shell(`<p class="c-empty-line">Loading…</p>`);
   await Promise.all([loadIndex(), loadDemos(), loadMembers(), inbox.unreadNow()]);
   await render();

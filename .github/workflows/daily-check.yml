@@ -1,0 +1,20 @@
+name: Check video calls (Daily)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["scripts/daily-check.ts", ".github/workflows/daily-check.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Rooms, join passes and transcripts
+        env:
+          DAILY_API_KEY: ${{ secrets.DAILY_API_KEY }}
+        run: deno run --allow-net --allow-env scripts/daily-check.ts

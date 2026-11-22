@@ -1,4 +1,5 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { openCall, callBack } from "./call.js?v=1";
 
 const SUPABASE_URL = "https://ktpztiyqyoalrwnqtqme.supabase.co";
 const SUPABASE_KEY = "sb_publishable_aUvlMasnVDO34rV8wBWnCw_oywTssOz";
@@ -109,6 +110,7 @@ function squareThumb(img, size = 160) {
 function armBack() { if (!history.state?.bfGuard) history.pushState({ bfGuard: true }, ""); }
 function backOne() {
   if (viewerOpen) { closeViewer(); return true; }
+  if (callBack(toast)) return true;
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   const ev = new CustomEvent("bf-back", { cancelable: true });   // coach mode and its overlays
   window.dispatchEvent(ev);
@@ -1512,17 +1514,65 @@ function msgBubble(m, urls) {
     <span>${mine ? "" : "Coach · "}${when(m.created_at)}</span></div>`;
 }
 
+// ---------- video calls ----------
+// Join from 15 minutes before the start until an hour after the booked end (same as the server).
+function callWindow(c) {
+  const t = new Date(c.starts_at).getTime();
+  return { open: t - 15 * 60e3, close: t + ((c.minutes || 30) + 60) * 60e3 };
+}
+async function joinCall(call, btn) {
+  if (!call) return;
+  if (btn) btn.disabled = true;
+  try {
+    const pass = await api("call_join", { call_id: call.id });
+    if (pass.need_consent) { if (btn) btn.disabled = false; return askCallConsent(call); }
+    clearInterval(msgPoll);
+    await openCall(pass, { esc, toast, onEnd: () => { if (tab === "coach") renderCoach(); } });
+  } catch (e) { toast(e.message || "Couldn't join the call"); }
+  if (btn) btn.disabled = false;
+}
+function askCallConsent(call) {
+  const body = openSheet(`
+    <h2>Before your first call</h2>
+    <p>Calls with Andrew are transcribed so you both get written call notes afterward. Your notes show up on this tab. No audio or video is saved.</p>
+    <button class="btn primary block" id="cc-ok">OK, join the call</button>
+    <button class="btn block" data-close style="margin-top:8px">Not now</button>`);
+  $("#cc-ok", body).addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    const { error } = await db.rpc("give_call_consent");
+    if (error) { e.currentTarget.disabled = false; return toast(error.message); }
+    closeSheet();
+    joinCall(call);
+  });
+}
+function showNotes(c) {
+  const n = c?.notes;
+  if (!n) return;
+  const mine = (n.actions ?? []).filter((a) => a.who !== "Andrew"), his = (n.actions ?? []).filter((a) => a.who === "Andrew");
+  openSheet(`
+    <h2>Call notes</h2>
+    <p class="muted small">${esc(c.title)} · ${dayFmt.format(new Date(c.starts_at))}</p>
+    ${n.summary ? `<p>${esc(n.summary)}</p>` : ""}
+    ${n.points?.length ? `<h3>What we covered</h3><ul class="notes-list">${n.points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
+    ${mine.length ? `<h3>Your next steps</h3><ul class="notes-list">${mine.map((a) => `<li>${esc(a.text)}</li>`).join("")}</ul>` : ""}
+    ${his.length ? `<h3>Andrew's next steps</h3><ul class="notes-list">${his.map((a) => `<li>${esc(a.text)}</li>`).join("")}</ul>` : ""}
+    <button class="btn block" data-close style="margin-top:12px">Close</button>`);
+}
+
 let msgPoll = null, recNow = null;
 async function renderCoach() {
   $("#sub").textContent = "Your coach";
-  const [{ data: calls }, { data: msgs }] = await Promise.all([
-    db.from("calls").select("*").gte("starts_at", new Date(Date.now() - 3600e3).toISOString()).order("starts_at").limit(1),
+  const [{ data: calls }, { data: msgs }, { data: past }] = await Promise.all([
+    db.from("calls").select("*").gte("starts_at", new Date(Date.now() - 5 * 3600e3).toISOString()).order("starts_at").limit(5),
     db.from("messages").select("*").order("created_at").limit(300),
+    db.from("calls").select("id, starts_at, title, notes, notes_status, joined_at").lt("starts_at", new Date().toISOString())
+      .in("notes_status", ["done", "waiting"]).not("joined_at", "is", null).order("starts_at", { ascending: false }).limit(4),
   ]);
   if (tab !== "coach") return;
-  const call = (calls ?? [])[0];
+  const call = (calls ?? []).find((c) => callWindow(c).close > Date.now());
   const list = msgs ?? [];
-  const live = call && Date.now() >= new Date(call.starts_at).getTime() - 10 * 60e3;
+  const live = call && callWindow(call).open <= Date.now();
+  const notes = (past ?? []).filter((c) => c.notes_status === "done" || (c.notes_status === "waiting" && callWindow(c).close > Date.now() - 2 * 3600e3));
   const paths = list.filter((m) => m.audio_path).map((m) => m.audio_path);
   const urls = {};
   if (paths.length) {
@@ -1539,7 +1589,9 @@ async function renderCoach() {
         <div class="small muted">${call ? `${esc(call.title)} · ${call.minutes} min` : "Your next check-in call shows up here."}</div>
       </div>
     </div>
-    ${call?.join_url ? `<a class="btn ${live ? "primary" : ""} block" href="${esc(call.join_url)}" target="_blank" rel="noopener" style="margin-top:8px;text-decoration:none">${ICO.video}Join call</a>` : ""}
+    ${live ? `<button class="btn primary block" id="join-call" style="margin-top:8px">${ICO.video}Join call</button>` : ""}
+    ${notes.length ? `<div class="call-notes">${notes.map((c) => `<button class="row-btn" data-notes="${c.id}" ${c.notes_status !== "done" ? "disabled" : ""}>
+        <span><b>Call notes</b><span class="muted small">${dayFmt.format(new Date(c.starts_at))}${c.notes_status !== "done" ? " · Writing…" : ""}</span></span>${c.notes_status === "done" ? ICO.chevR : ""}</button>`).join("")}</div>` : ""}
     <h3>Messages</h3>
     <div class="bubbles" id="bubbles">
       ${list.length ? list.map((m) => msgBubble(m, urls)).join("")
@@ -1560,6 +1612,8 @@ async function renderCoach() {
   setBtn();
   $("#msg").addEventListener("input", setBtn);
   app.querySelectorAll("[data-demo]").forEach((b) => b.addEventListener("click", () => openViewer(b.dataset.demo, { title: b.dataset.title || "Video", start: Number(b.dataset.start) || 0 })));
+  $("#join-call")?.addEventListener("click", (e) => joinCall(call, e.currentTarget));
+  app.querySelectorAll("[data-notes]").forEach((b) => b.addEventListener("click", () => showNotes((past ?? []).find((c) => c.id === b.dataset.notes))));
 
   const after = (id) => api("message_sent", { message_id: id }).catch(() => {}).then(() => { if (tab === "coach" && !recNow) renderCoach(); });
   $("#cmp").addEventListener("submit", async (e) => {
@@ -2293,7 +2347,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=13");
+    const m = await import("./coach.js?v=14");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }

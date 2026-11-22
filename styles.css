@@ -574,3 +574,22 @@ a.btn.primary { color: var(--accent-ink); }
 .wk-nav h3 { flex: 1; margin: 0; }
 .wk-arrow { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
 .wk-today { flex: none; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--accent); background: none; color: var(--accent); font: 600 13px Inter, sans-serif; cursor: pointer; }
+
+/* Video calls */
+.call-notes { display: grid; gap: 6px; margin-top: 8px; }
+.row-btn { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; color: var(--ink); font: inherit; cursor: pointer; }
+.row-btn > span { display: grid; gap: 2px; }
+.row-btn b { font-weight: 600; }
+.row-btn:disabled { cursor: default; opacity: .75; }
+.row-btn svg { color: var(--muted); flex: none; }
+.notes-list { margin: 6px 0 14px; padding-left: 20px; display: grid; gap: 6px; }
+.sheet h3 { margin: 16px 0 4px; }
+#call { position: fixed; inset: 0; z-index: 300; display: flex; flex-direction: column; background: #050505; color: #F2EFE9; }
+#call .call-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; font-size: 15px; }
+#call .call-bar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#call .call-tx { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #A8A49C; white-space: nowrap; }
+#call .call-tx i { width: 8px; height: 8px; border-radius: 50%; background: #EF4444; }
+#call .call-tx[hidden] { display: none; }
+#call .call-stage { flex: 1; min-height: 0; padding-bottom: env(safe-area-inset-bottom); }
