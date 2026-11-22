@@ -2186,14 +2186,35 @@ function stopScanner() {
 }
 
 // iPhone Safari has no built-in barcode reader, so load ZXing (WebAssembly) there, only when scanning.
+// Its .wasm comes from cdn.jsdelivr.net (the same place the app's other library loads from) and is loaded
+// up front, so a failed download shows a message instead of a scanner that silently never reads anything.
 const BARCODE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
-async function barcodeReader() {
-  if ("BarcodeDetector" in window) {
-    const formats = (await BarcodeDetector.getSupportedFormats()).filter((f) => BARCODE_FORMATS.includes(f));
-    if (formats.length) return new BarcodeDetector({ formats });
-  }
-  const m = await import("https://cdn.jsdelivr.net/npm/barcode-detector@3.2.4/dist/es/ponyfill.js");
-  return new m.BarcodeDetector({ formats: BARCODE_FORMATS });
+let readerPromise = null;
+function barcodeReader() {
+  return (readerPromise ??= (async () => {
+    if ("BarcodeDetector" in window) {
+      const formats = (await BarcodeDetector.getSupportedFormats()).filter((f) => BARCODE_FORMATS.includes(f));
+      if (formats.length) return new BarcodeDetector({ formats });
+    }
+    const m = await import("https://cdn.jsdelivr.net/npm/barcode-detector@3.2.4/dist/es/ponyfill.js");
+    await m.prepareZXingModule({
+      overrides: { locateFile: (path, prefix) => (path.endsWith(".wasm") ? `https://cdn.jsdelivr.net/npm/zxing-wasm@${m.ZXING_WASM_VERSION}/dist/reader/${path}` : prefix + path) },
+      fireImmediately: true,
+    });
+    return new m.BarcodeDetector({ formats: BARCODE_FORMATS });
+  })().catch((e) => { readerPromise = null; throw e; }));
+}
+const barcodeHit = (codes) => codes.find((c) => /^\d{6,14}$/.test(c.rawValue))?.rawValue;
+
+// The part of the camera frame inside the white box (a little bigger), so the barcode fills more of what gets read.
+function boxCrop(video, canvas) {
+  const W = video.videoWidth, H = video.videoHeight;
+  const [vw, vh] = W / H > 4 / 3 ? [H * 4 / 3, H] : [W, W * 3 / 4];   // what the 4:3 box shows
+  const cw = vw * 0.92, ch = vh * 0.7;
+  const scale = Math.min(1, 1000 / cw);
+  canvas.width = Math.round(cw * scale); canvas.height = Math.round(ch * scale);
+  canvas.getContext("2d", { willReadFrequently: true }).drawImage(video, (W - cw) / 2, (H - ch) / 2, cw, ch, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }
 
 async function openScanner() {
@@ -2201,46 +2222,70 @@ async function openScanner() {
   const body = openSheet(`
     <h2>Scan a barcode</h2>
     ${supported ? `<div class="scan-box"><video id="cam" playsinline muted autoplay></video><div class="scan-line"></div></div>
-      <p class="small muted" style="text-align:center">Hold the barcode inside the box.</p>` :
-      `<p class="small muted">This browser can't open the camera. Type the number under the barcode instead.</p>`}
+      <p class="small muted" id="scan-msg" style="text-align:center">Starting the camera…</p>` :
+      `<p class="small muted">This browser can't open the camera. Take a photo of the barcode or type the number instead.</p>`}
+    <button type="button" class="btn ghost block" id="bc-photo">Take a photo of the barcode</button>
+    <input type="file" id="bc-file" accept="image/*" capture="environment" hidden>
     <form id="bf" style="display:flex;gap:8px;margin-top:8px">
       <input class="input" id="bc" inputmode="numeric" placeholder="Or type the barcode number" autocomplete="off">
       <button class="btn primary">Look up</button>
     </form>`);
+  const msg = (t) => { const el = $("#scan-msg", body); if (el) el.textContent = t; };
   $("#bf", body).addEventListener("submit", (e) => {
     e.preventDefault();
     const code = $("#bc", body).value.replace(/\D/g, "");
     if (code.length >= 6) handleBarcode(code);
   });
+  // Backup: a still photo is sharper than live video on older phones.
+  $("#bc-photo", body).addEventListener("click", () => $("#bc-file", body).click());
+  $("#bc-file", body).addEventListener("change", async (e) => {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (!file) return;
+    const b = $("#bc-photo", body); b.disabled = true; b.textContent = "Reading the barcode…";
+    try {
+      const detector = await barcodeReader();
+      const code = barcodeHit(await detector.detect(await createImageBitmap(file)));
+      if (code) return handleBarcode(code);
+      toast("Couldn't read that barcode. Fill the photo with it, in good light, and try again.", 4000);
+    } catch { toast("Couldn't read that photo. Type the number instead."); }
+    b.disabled = false; b.textContent = "Take a photo of the barcode";
+  });
   if (!supported) return;
 
   try {
     // Start the camera and load the reader at the same time; keep hold of the camera so it always gets stopped.
-    const cam = navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false })
+    const cam = navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
       .then((st) => (scanStream = st));
-    const detector = await barcodeReader().catch(async (e) => { await cam.catch(() => {}); throw e; });
+    const detector = await barcodeReader().catch(async (e) => { await cam.catch(() => {}); throw Object.assign(e, { reader: true }); });
     await cam;
     if (!$("#cam", body)) return stopScanner();  // sheet was closed while the camera was starting
     const video = $("#cam", body);
     video.srcObject = scanStream;
     await video.play();
+    msg("Hold the barcode inside the box, about 6 inches away.");
+    const canvas = document.createElement("canvas");
+    let n = 0, fails = 0;
     const tick = async () => {
       if (!scanStream) return;
       try {
-        const codes = await detector.detect(video);
-        const hit = codes.find((c) => /^\d{6,14}$/.test(c.rawValue));
-        if (hit) {
-          navigator.vibrate?.(60);
-          return handleBarcode(hit.rawValue);
+        if (video.readyState >= 2) {
+          // Mostly read just the box; every third try reads the whole frame.
+          const src = n++ % 3 === 2 ? video : boxCrop(video, canvas);
+          const code = barcodeHit(await detector.detect(src));
+          if (code) { navigator.vibrate?.(60); return handleBarcode(code); }
+          fails = 0;
         }
-      } catch {}
-      scanTimer = setTimeout(tick, 200);
+      } catch (err) {
+        if (++fails === 5) msg(`The scanner hit a problem (${err?.message || err}). Take a photo or type the number instead.`);
+      }
+      scanTimer = setTimeout(tick, 150);
     };
     tick();
   } catch (err) {
     stopScanner();
     const box = $(".scan-box", body);
-    if (box) box.outerHTML = `<p class="small muted">${err?.name === "NotAllowedError" ? "Camera permission was blocked" : err?.name === "NotFoundError" ? "Couldn't find a camera" : "Couldn't start the scanner"}. You can type the number instead.</p>`;
+    if (box) box.remove();
+    msg(`${err?.reader ? "The scanner didn't load" : err?.name === "NotAllowedError" ? "Camera permission was blocked" : err?.name === "NotFoundError" ? "Couldn't find a camera" : "Couldn't start the camera"}. Take a photo or type the number instead.`);
   }
 }
 
