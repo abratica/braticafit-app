@@ -33,4 +33,4 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           SUPABASE_DB_URL: postgres://unused@localhost/unused
-        run: deno run --allow-net --allow-env --allow-read scripts/call-e2e/notes.ts
+        run: rm -rf scripts/call-e2e/node_modules scripts/call-e2e/package*.json && deno run --allow-net --allow-env --allow-read scripts/call-e2e/notes.ts

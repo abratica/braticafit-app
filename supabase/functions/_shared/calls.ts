@@ -118,9 +118,12 @@ export function vttToText(vtt: string): string {
   let who = "", said = "";
   const flush = () => { if (said.trim()) lines.push(`${who || "Speaker"}: ${said.trim()}`); said = ""; };
   for (const block of vtt.replace(/\r/g, "").split(/\n\n+/)) {
-    const rows = block.split("\n").filter((l) => l && !/-->/.test(l) && !/^WEBVTT/.test(l) && !/^(NOTE|STYLE)\b/.test(l) && !/^\d+$/.test(l.trim()));
-    for (const row of rows) {
-      const m = row.match(/^<v\s+([^>]+)>(.*?)(<\/v>)?$/) || row.match(/^([A-Z][\w .'-]{0,40}):\s+(.*)$/);
+    const rows = block.split("\n");
+    const at = rows.findIndex((l) => l.includes("-->"));
+    if (at < 0) continue;                                  // header, NOTE, STYLE
+    for (const row of rows.slice(at + 1)) {
+      // Daily writes "<v>Name:</v>text"; standard WebVTT is "<v Name>text</v>".
+      const m = row.match(/^<v>\s*([^<]*?):?\s*<\/v>\s*(.*)$/) || row.match(/^<v\s+([^>]+)>(.*?)(<\/v>)?$/);
       const name = m ? m[1].trim() : who;
       const text = (m ? m[2] : row).replace(/<[^>]+>/g, "").trim();
       if (!text) continue;
