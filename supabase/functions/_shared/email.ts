@@ -15,7 +15,7 @@ You're in. This is where your workouts, food log, and check-ins with me will liv
 
 {button}
 
-On your phone, add it to your home screen so it works like an app.
+On your phone, add it to your home screen so it works like an app. Then open it and sign in with this email. You'll get a 6-digit code to type in.
 
 Talk soon,
 Andrew`,
@@ -29,11 +29,12 @@ export function emailConfigured() {
 }
 
 // Fill in {first name} and turn the plain-text body into the branded HTML email.
-// `signIn` is a one-time link that opens the app already signed in; without it the button just opens the app.
-export function renderWelcome(tpl: { subject: string; body: string }, name: string, email: string, signIn?: string) {
+// The button opens the app with their email filled in; they sign in there with a 6-digit code,
+// so on iPhone they end up signed in inside the home-screen app, not just in Safari.
+export function renderWelcome(tpl: { subject: string; body: string }, name: string, email: string) {
   const first = (name || "").trim().split(/\s+/)[0] || "there";
   const fill = (s: string) => s.replace(/\{\s*first name\s*\}/gi, first);
-  const link = signIn || `${APP_URL}?email=${encodeURIComponent(email)}`;
+  const link = `${APP_URL}?email=${encodeURIComponent(email)}`;
   const subject = fill(tpl.subject).trim() || "Welcome to BraticaFit";
   let body = fill(tpl.body).replace(/\r\n/g, "\n").trim();
   if (!/\{\s*button\s*\}/i.test(body)) body += "\n\n{button}";
@@ -46,7 +47,7 @@ export function renderWelcome(tpl: { subject: string; body: string }, name: stri
       : para(esc(p).replace(/\n/g, "<br>"))
   ).join("\n");
 
-  const html = layout(blocks, `Button not working or expired? Open ${esc(APP_URL)} and sign in with ${esc(email)}.`);
+  const html = layout(blocks, `Button not working? Open ${esc(APP_URL)} and sign in with ${esc(email)}.`);
   const text = body.replace(/\{\s*button\s*\}/gi, `Open BraticaFit: ${link}`);
   return { subject, html, text };
 }

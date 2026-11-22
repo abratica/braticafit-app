@@ -162,17 +162,22 @@ function renderSignIn() {
       <img class="auth-logo wide" src="icons/wordmark-clarity.webp" alt="BraticaFit" width="300" height="53">
       <form id="f-email" class="auth-form">
         <p class="auth-head">Sign in</p>
+        ${iosInstallTip()}
         ${linkError ? `<p class="auth-msg">That sign-in link expired or was already used. Send yourself a fresh one.</p>`
           : `<p class="auth-sub">Use the email Andrew added you with.</p>`}
         <label class="auth-label" for="email">Email</label>
         <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required value="${esc(preset)}">
-        <button class="auth-btn">Email me a sign-in link</button>
+        <button class="auth-btn">Email me a code</button>
       </form>
-      <div id="sent" class="auth-sent" hidden>
+      <form id="sent" class="auth-form" hidden>
         <p class="auth-head">Check your email</p>
-        <p>Tap <b>Log In</b> in the email. It opens BraticaFit signed in.</p>
-        <p class="auth-fine">Use this same phone. Didn't get it? Check spam, or <button type="button" class="auth-link" id="resend">send again</button>.</p>
-      </div>
+        <p class="auth-sub">Enter the 6-digit code sent to <span id="sent-email"></span>.</p>
+        <label class="auth-label" for="code">Code</label>
+        <input class="auth-input auth-code" id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" placeholder="123456" required>
+        <button class="auth-btn">Sign in</button>
+        <p class="auth-fine" style="margin-top:14px">Didn't get it? Check spam, or <button type="button" class="auth-link" id="resend">send a new code</button>.
+          <br><button type="button" class="auth-link" id="sent-back">Use a different email</button></p>
+      </form>
       <form id="f-req" class="auth-form" hidden>
         <p class="auth-head">Not on the list yet</p>
         <p class="auth-sub"><span id="req-email"></span> isn't on the client list. Ask Andrew for access and you'll get an email once you're added.</p>
@@ -200,12 +205,32 @@ function renderSignIn() {
         $("#req-email").textContent = email();
         show("f-req");
         $("#req-name").focus();
-      } else show("sent");
+      } else {
+        $("#sent-email").textContent = email();
+        show("sent");
+        $("#code").value = "";
+        $("#code").focus();
+      }
     } catch (e) { toast(e.message); }
-    busy("f-email", false, "Email me a sign-in link");
+    busy("f-email", false, "Email me a code");
   };
   $("#f-email").addEventListener("submit", (e) => { e.preventDefault(); send(); });
-  $("#resend").addEventListener("click", send);
+  $("#resend").addEventListener("click", async () => { await send(); toast("New code sent"); });
+  $("#sent-back").addEventListener("click", () => { show("f-email"); $("#email").focus(); });
+  $("#sent").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const token = $("#code").value.replace(/\D/g, "");
+    if (token.length < 6) return toast("Enter the 6-digit code");
+    busy("sent", true, "Signing in…");
+    const { error } = await db.auth.verifyOtp({ email: email(), token, type: "email" });
+    if (error) {
+      busy("sent", false, "Sign in");
+      return toast(/expired|invalid/i.test(error.message) ? "That code didn't work. Check it, or send a new one." : error.message);
+    }
+    // onAuthStateChange takes it from here.
+  });
+  // Pasting or auto-filling the whole code signs in right away.
+  $("#code").addEventListener("input", (e) => { if (e.target.value.replace(/\D/g, "").length === 6) $("#sent").requestSubmit(); });
   $("#req-back").addEventListener("click", () => { show("f-email"); $("#email").focus(); });
   $("#f-req").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -2376,6 +2401,15 @@ async function enablePush() {
 }
 
 // ---------------------------------------------------------------------------
+// iPhone has no install button: show how to add it to the home screen (only in Safari, not once installed).
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const SHARE_I = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="vertical-align:-3px"><path d="M12 3v12M8 7l4-4 4 4M6 11H5v10h14V11h-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function iosInstallTip() {
+  if (!isIOS() || standalone()) return "";
+  return `<div class="ios-tip"><b>Add BraticaFit to your home screen first</b>
+    <span>In Safari, tap Share ${SHARE_I} then <b>Add to Home Screen</b>. Open it from your home screen and sign in there.</span></div>`;
+}
+
 // Install prompt (Android Chrome)
 // ---------------------------------------------------------------------------
 let deferredInstall = null;
@@ -2383,8 +2417,15 @@ const standalone = () => matchMedia("(display-mode: standalone)").matches || nav
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstall = e; showInstallBar(); });
 function showInstallBar() {
   const slot = $("#install-slot");
-  if (!slot || !deferredInstall || standalone()) return;
+  if (!slot || standalone()) return;
   try { if (localStorage.getItem("psh-install-x")) return; } catch {}
+  if (!deferredInstall && isIOS()) {
+    slot.innerHTML = `<div class="install-bar"><span><b>Install BraticaFit</b>Tap Share ${SHARE_I} then Add to Home Screen</span>
+      <button class="x" id="inst-x" aria-label="Not now">×</button></div>`;
+    $("#inst-x").addEventListener("click", () => { try { localStorage.setItem("psh-install-x", "1"); } catch {} slot.innerHTML = ""; });
+    return;
+  }
+  if (!deferredInstall) return;
   slot.innerHTML = `<div class="install-bar"><span><b>Install BraticaFit</b>Your workouts and coach on your home screen</span>
     <button class="btn primary" id="inst">Install</button><button class="x" id="inst-x" aria-label="Not now">×</button></div>`;
   $("#inst").addEventListener("click", async () => { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; slot.innerHTML = ""; });

@@ -54,15 +54,6 @@ async function isAllowed(email: string): Promise<boolean> {
   return rows[0]?.ok === true;
 }
 
-// One-time link that opens the app already signed in (valid for the sign-in link lifetime).
-async function signInLink(email: string): Promise<string> {
-  const redirectTo = `${APP_URL}?email=${encodeURIComponent(email)}`;
-  let r = await admin.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } });
-  if (r.error) r = await admin.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } });
-  if (r.error || !r.data?.properties?.action_link) throw r.error ?? new Error("Couldn't make a sign-in link");
-  return r.data.properties.action_link;
-}
-
 // Actions anyone can call from the sign-in screen.
 async function publicAction(body: Record<string, unknown>): Promise<Response | null> {
   if (body.action === "send_link") {
@@ -170,13 +161,12 @@ Deno.serve(async (req) => {
         const tpl = { subject: saved.welcome_subject ?? DEFAULT_WELCOME.subject, body: saved.welcome_body ?? DEFAULT_WELCOME.body };
         if (body.test) {
           if (!me.email) return json({ error: "No email on your account" }, 400);
-          await sendEmail(me.email, renderWelcome(tpl, "Andrew", me.email, await signInLink(me.email).catch(() => undefined)));
+          await sendEmail(me.email, renderWelcome(tpl, "Andrew", me.email));
           return json({ sent: me.email });
         }
         const m = await sql`select id, email, name from public.members where id = ${body.member_id ?? null}`;
         if (!m.length) return json({ error: "Client not found" }, 404);
-        const link = await signInLink(m[0].email).catch((e) => { console.error("sign-in link failed", e); return undefined; });
-        await sendEmail(m[0].email, renderWelcome(tpl, m[0].name ?? "", m[0].email, link));
+        await sendEmail(m[0].email, renderWelcome(tpl, m[0].name ?? "", m[0].email));
         await sql`update public.members set welcomed_at = now() where id = ${m[0].id}`;
         return json({ sent: m[0].email });
       }

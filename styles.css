@@ -236,6 +236,10 @@ body.signin .top { display: none; }
 .auth-opt { font-weight: 400; color: #6B6B66; }
 .auth-note { height: auto; min-height: 84px; padding: 12px 16px; resize: vertical; font: 16px/1.4 Inter, sans-serif; }
 .auth-btn:disabled { opacity: .7; }
+.auth-code { font: 600 26px/1 Inter, sans-serif; letter-spacing: .3em; text-align: center; }
+.auth-code::placeholder { letter-spacing: .3em; color: #C9C9C3; }
+.ios-tip { display: grid; gap: 4px; margin: 0 0 20px; padding: 12px 14px; border-radius: 12px; background: #EEF3FE; border: 1px solid #D6E2FC;
+  font-size: 14px; line-height: 1.45; color: #0F0F0E; }
 .auth-link { background: none; border: 0; padding: 0; color: #2563EB; font-weight: 600; cursor: pointer; text-decoration: underline; font-size: inherit; }
 
 /* ---------- Trainee app ---------- */

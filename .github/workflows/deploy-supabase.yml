@@ -43,7 +43,8 @@ jobs:
           {
             "site_url": "https://abratica.github.io/braticafit-app/",
             "uri_allow_list": "https://abratica.github.io/braticafit-app/**",
-            "mailer_otp_exp": 86400
+            "mailer_otp_exp": 3600,
+            "mailer_otp_length": 6
           }
           JSON
           CODE=$(curl -sS -X PATCH \
@@ -66,9 +67,9 @@ jobs:
             smtp_user: "resend",
             smtp_pass: $pass,
             rate_limit_email_sent: 60,
-            mailer_subjects_magic_link: "Your BraticaFit sign-in link",
+            mailer_subjects_magic_link: "Your BraticaFit sign-in code",
             mailer_templates_magic_link_content: $tpl,
-            mailer_subjects_confirmation: "Your BraticaFit sign-in link",
+            mailer_subjects_confirmation: "Your BraticaFit sign-in code",
             mailer_templates_confirmation_content: $tpl
           }' > email.json
           CODE=$(curl -sS -X PATCH \
