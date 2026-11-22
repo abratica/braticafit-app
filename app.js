@@ -126,6 +126,7 @@ $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-close
 // ---------------------------------------------------------------------------
 function renderSignIn() {
   delete document.documentElement.dataset.theme;  // sign-in looks the same for everyone
+  const mk = document.querySelector(".wordmark"); if (mk) mk.src = "icons/wordmark.webp";
   $("#tabs").hidden = true;
   $("#settings").hidden = true;
   document.body.classList.add("signin");
@@ -2280,6 +2281,8 @@ function applyTheme(theme) {
   else delete document.documentElement.dataset.theme;
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = t === "clarity" ? "#F9F9F8" : "#0d0d0d";
+  const mark = document.querySelector(".wordmark");
+  if (mark) mark.src = t === "clarity" ? "icons/wordmark-clarity.webp" : "icons/wordmark.webp";
   try { localStorage.setItem("bf-theme", t); } catch {}
 }
 

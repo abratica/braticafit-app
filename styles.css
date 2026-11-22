@@ -538,7 +538,7 @@ a.btn.primary { color: var(--accent-ink); }
   --texture: none; color-scheme: light;
 }
 [data-theme="clarity"] body { background-image: none; }
-[data-theme="clarity"] .wordmark { filter: brightness(0); }
+[data-theme="clarity"] .wordmark { height: 30px; width: auto; margin: 13px 0; }
 /* Titles in Playfair, sentence case */
 [data-theme="clarity"] h2, [data-theme="clarity"] .w-title, [data-theme="clarity"] .call-title, [data-theme="clarity"] .viewer-top b {
   font-family: var(--serif); font-weight: 700; text-transform: none; letter-spacing: 0;
