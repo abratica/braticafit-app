@@ -520,7 +520,7 @@ export function createTrain(ctx) {
     return `
       <section class="c-card"><h3>What they see</h3>
         <div class="c-setting"><div><b>App look</b><span class="c-vm">Gym is the dark look. Clarity matches braticafit.com. Takes effect next time they open the app.</span></div>
-          <span class="c-mode">${[["gym", "Gym"], ["clarity", "Clarity"]].map(([k, l]) => `<button data-t-theme="${k}" aria-pressed="${(s.theme || "gym") === k}">${l}</button>`).join("")}</span></div>
+          <span class="c-mode">${[["gym", "Gym"], ["clarity", "Clarity"]].map(([k, l]) => `<button data-t-theme="${k}" aria-pressed="${(s.theme || "clarity") === k}">${l}</button>`).join("")}</span></div>
         ${sw("food", "Food logging", "The Food tab and food logging.")}
         ${sw("weight", "Weight tracking", "Weigh-ins and the weight chart. Turn off for clients who aren't here for weight.")}
         ${sw("targets_edit", "Can change their own targets", "Off means they see the targets you set but can't edit them.")}

@@ -2667,7 +2667,7 @@ async function enter(session) {
     Object.assign(features, s ?? {});
   }
   $('#tabs button[data-tab="food"]').hidden = !features.food;
-  applyTheme(isCoach ? "gym" : features.theme);
+  applyTheme(isCoach ? "gym" : features.theme || "clarity");  // Clarity unless a client is set to Gym
   // Which version of Precision Nutrition demos to show: men's if their targets say male, otherwise women's.
   const [{ data: nt }] = await Promise.all([db.from("nutrition_targets").select("sex").maybeSingle(), loadPnInfo()]);
   demoVer = nt?.sex === "male" ? "men" : "women";
@@ -2681,7 +2681,7 @@ async function enter(session) {
 
 // The look the coach picked for this client: "gym" (default, dark) or "clarity" (the braticafit.com look).
 function applyTheme(theme) {
-  const t = theme === "clarity" ? "clarity" : "gym";
+  const t = theme === "gym" ? "gym" : "clarity";
   if (t === "clarity") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   const meta = document.querySelector('meta[name="theme-color"]');
