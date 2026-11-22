@@ -488,6 +488,7 @@ a.btn.primary { color: var(--accent-ink); }
 #iv .iv-time { position: relative; font: 800 min(34vw, 21vh, 170px)/1 Inter, sans-serif; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 #iv .iv-time.long { font-size: min(22vw, 14vh, 110px); }
 #iv .iv-move { font: 700 26px/1.2 Inter, sans-serif; max-width: 90vw; min-height: 1.2em; }
+#iv.work .iv-move { font-size: 36px; }
 #iv .iv-boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 460px); }
 #iv .iv-boxes > div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: 14px; background: rgba(0,0,0,.16); }
 #iv .iv-boxes b { font: 700 32px/1.1 Inter, sans-serif; font-variant-numeric: tabular-nums; }
