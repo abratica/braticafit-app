@@ -362,6 +362,7 @@ textarea.input { resize: vertical; line-height: 1.45; }
 /* Coach */
 .call { display: flex; align-items: center; gap: 14px; }
 .call img { border-radius: 50%; flex: none; }
+:root[data-theme="clarity"] .call img { box-shadow: 0 0 0 1px var(--line); }
 .call .main { flex: 1; min-width: 0; }
 .call-title { font: 600 18px/1.2 var(--display); text-transform: uppercase; letter-spacing: .06em; }
 .bubbles { display: flex; flex-direction: column; gap: 12px; }

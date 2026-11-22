@@ -1533,7 +1533,7 @@ async function renderCoach() {
 
   app.innerHTML = `
     <div class="card call">
-      <img src="icons/logo.webp" alt="" width="54" height="54">
+      <img src="icons/${document.documentElement.dataset.theme === "clarity" ? "logo-clarity" : "logo"}.webp" alt="" width="54" height="54">
       <div class="main">
         <div class="call-title">${call ? `Next call · ${callFmt.format(new Date(call.starts_at))}` : "No call booked"}</div>
         <div class="small muted">${call ? `${esc(call.title)} · ${call.minutes} min` : "Your next check-in call shows up here."}</div>
