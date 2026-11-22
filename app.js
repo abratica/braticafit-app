@@ -257,17 +257,26 @@ const player = (id, start = 0) => `<div class="player"><iframe src="${embedSrc(i
 // Full-screen video viewer for exercise demos and videos from the coach.
 // Closes with ✕, a swipe down, Escape, or the phone's back gesture, and always stops the video.
 // ---------------------------------------------------------------------------
-let pnInfo = null;
-async function pnLookup(id) {
-  if (!String(id).startsWith("vm:")) return null;
+let pnInfo = null, pnMap = null;
+function loadPnInfo() {
   if (!pnInfo) {
     pnInfo = fetch("data/pn.json").then((r) => r.json()).then((j) => {
       const m = new Map();
       for (const e of j.items || []) for (const v of ["men", "women"]) if (e[v]) m.set("vm:" + e[v], e);
-      return m;
-    }).catch(() => new Map());
+      return (pnMap = m);
+    }).catch(() => (pnMap = new Map()));
   }
-  return (await pnInfo).get(id) || null;
+  return pnInfo;
+}
+async function pnLookup(id) {
+  if (!String(id).startsWith("vm:")) return null;
+  return (await loadPnInfo()).get(id) || null;
+}
+// Precision Nutrition demos come in a men's and a women's version; show the one that matches the client.
+let demoVer = "women";
+function demoFor(id) {
+  const e = id && pnMap?.get(id);
+  return e && e[demoVer] ? "vm:" + e[demoVer] : id;
 }
 let viewerOpen = false, viewerPushed = false;
 function openViewer(id, { title = "", start = 0 } = {}) {
@@ -635,7 +644,7 @@ async function openSession(id) {
     const sub = [x.scheme, !x.superset || isLastInSuperset(list, x) ? `rest ${fmtRest(restOf(x))}` : "no rest, go to next"].filter(Boolean).join(" · ");
     return `
       <div class="ex-head">
-        ${x.demo_video_id ? `<button class="ex-demo" data-demo="${x.demo_video_id}" data-name="${esc(x.name)}" style="background-image:url('${ytThumb(x.demo_video_id)}')" aria-label="Watch the ${esc(x.name)} demo"><span class="play sm">${ICO.play}</span></button>` : ""}
+        ${x.demo_video_id ? `<button class="ex-demo" data-demo="${demoFor(x.demo_video_id)}" data-name="${esc(x.name)}" style="background-image:url('${ytThumb(demoFor(x.demo_video_id))}')" aria-label="Watch the ${esc(x.name)} demo"><span class="play sm">${ICO.play}</span></button>` : ""}
         <div class="main"><div class="name">${ssLabel[x.id] ? `<span class="ss-tag">${ssLabel[x.id]}</span>` : ""}${esc(x.name)}</div><div class="small muted">${esc(sub)}</div></div>
       </div>
       ${prev ? `<div class="last-time">Last time · ${shortFmt.format(fromYmd(prev.day))}: <b>${esc(prev.summary)}</b></div>` : ""}
@@ -2267,6 +2276,9 @@ async function enter(session) {
   }
   $('#tabs button[data-tab="food"]').hidden = !features.food;
   applyTheme(isCoach ? "gym" : features.theme);
+  // Which version of Precision Nutrition demos to show: men's if their targets say male, otherwise women's.
+  const [{ data: nt }] = await Promise.all([db.from("nutrition_targets").select("sex").maybeSingle(), loadPnInfo()]);
+  demoVer = nt?.sex === "male" ? "men" : "women";
   claimThisDevice();
   $("#tabs").hidden = false;
   $("#settings").hidden = false;
