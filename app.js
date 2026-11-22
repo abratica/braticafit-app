@@ -2174,7 +2174,7 @@ function openDbFood(hit) {
 }
 
 // ---------------------------------------------------------------------------
-// Barcode scanning (camera + Chrome's built-in barcode reader, Open Food Facts lookup)
+// Barcode scanning (camera + Chrome's built-in barcode reader, or the ZXing reader on iPhone; Open Food Facts lookup)
 // ---------------------------------------------------------------------------
 let scanStream = null;
 let scanTimer = null;
@@ -2185,13 +2185,24 @@ function stopScanner() {
   scanStream = null;
 }
 
+// iPhone Safari has no built-in barcode reader, so load ZXing (WebAssembly) there, only when scanning.
+const BARCODE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
+async function barcodeReader() {
+  if ("BarcodeDetector" in window) {
+    const formats = (await BarcodeDetector.getSupportedFormats()).filter((f) => BARCODE_FORMATS.includes(f));
+    if (formats.length) return new BarcodeDetector({ formats });
+  }
+  const m = await import("https://cdn.jsdelivr.net/npm/barcode-detector@3.2.4/dist/es/ponyfill.js");
+  return new m.BarcodeDetector({ formats: BARCODE_FORMATS });
+}
+
 async function openScanner() {
-  const supported = "BarcodeDetector" in window;
+  const supported = !!navigator.mediaDevices?.getUserMedia;
   const body = openSheet(`
     <h2>Scan a barcode</h2>
-    ${supported ? `<div class="scan-box"><video id="cam" playsinline muted></video><div class="scan-line"></div></div>
+    ${supported ? `<div class="scan-box"><video id="cam" playsinline muted autoplay></video><div class="scan-line"></div></div>
       <p class="small muted" style="text-align:center">Hold the barcode inside the box.</p>` :
-      `<p class="small muted">This browser can't read barcodes from the camera. Type the number under the barcode instead.</p>`}
+      `<p class="small muted">This browser can't open the camera. Type the number under the barcode instead.</p>`}
     <form id="bf" style="display:flex;gap:8px;margin-top:8px">
       <input class="input" id="bc" inputmode="numeric" placeholder="Or type the barcode number" autocomplete="off">
       <button class="btn primary">Look up</button>
@@ -2204,9 +2215,12 @@ async function openScanner() {
   if (!supported) return;
 
   try {
-    const formats = (await BarcodeDetector.getSupportedFormats()).filter((f) => ["ean_13", "ean_8", "upc_a", "upc_e"].includes(f));
-    const detector = new BarcodeDetector({ formats: formats.length ? formats : undefined });
-    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false });
+    // Start the camera and load the reader at the same time; keep hold of the camera so it always gets stopped.
+    const cam = navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false })
+      .then((st) => (scanStream = st));
+    const detector = await barcodeReader().catch(async (e) => { await cam.catch(() => {}); throw e; });
+    await cam;
+    if (!$("#cam", body)) return stopScanner();  // sheet was closed while the camera was starting
     const video = $("#cam", body);
     video.srcObject = scanStream;
     await video.play();
@@ -2226,7 +2240,7 @@ async function openScanner() {
   } catch (err) {
     stopScanner();
     const box = $(".scan-box", body);
-    if (box) box.outerHTML = `<p class="small muted">Couldn't open the camera${err?.name === "NotAllowedError" ? " (permission was blocked)" : ""}. You can type the number instead.</p>`;
+    if (box) box.outerHTML = `<p class="small muted">${err?.name === "NotAllowedError" ? "Camera permission was blocked" : err?.name === "NotFoundError" ? "Couldn't find a camera" : "Couldn't start the scanner"}. You can type the number instead.</p>`;
   }
 }
 
