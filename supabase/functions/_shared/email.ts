@@ -2,7 +2,7 @@
 // Sent through Resend from Andrew's braticafit.com address.
 
 export const APP_URL = "https://abratica.github.io/braticafit-app/";
-const LOGO = APP_URL + "icons/wordmark-email.png";
+const LOGO = APP_URL + "icons/wordmark-email-clarity.png";
 const FROM = "Andrew from BraticaFit <andrew@braticafit.com>";
 const REPLY_TO = "andrew@braticafit.com";
 export const COACH_INBOX = "andrew@braticafit.com";
@@ -38,14 +38,12 @@ export function renderWelcome(tpl: { subject: string; body: string }, name: stri
   let body = fill(tpl.body).replace(/\r\n/g, "\n").trim();
   if (!/\{\s*button\s*\}/i.test(body)) body += "\n\n{button}";
 
-  const button = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 22px"><tr><td style="border-radius:10px;background:#fb4311">
-    <a href="${link}" style="display:inline-block;padding:14px 26px;font:700 15px/1 Arial,Helvetica,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#ffffff;text-decoration:none">Open BraticaFit</a>
-  </td></tr></table>`;
+  const button = btn(link, "Open BraticaFit");
 
   const blocks = body.split(/\n{2,}/).map((p) =>
     /^\s*\{\s*button\s*\}\s*$/i.test(p)
       ? button
-      : `<p style="margin:0 0 18px;font:16px/1.55 Arial,Helvetica,sans-serif;color:#eeeeee">${esc(p).replace(/\n/g, "<br>")}</p>`
+      : para(esc(p).replace(/\n/g, "<br>"))
   ).join("\n");
 
   const html = layout(blocks, `Button not working or expired? Open ${esc(APP_URL)} and sign in with ${esc(email)}.`);
@@ -53,27 +51,33 @@ export function renderWelcome(tpl: { subject: string; body: string }, name: stri
   return { subject, html, text };
 }
 
+// Clarity look: light page, white card, dark text, blue pill button.
+const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+const para = (html: string) => `<p style="margin:0 0 18px;font:16px/1.6 ${FONT};color:#0F0F0E">${html}</p>`;
+const btn = (href: string, label: string) => `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 24px"><tr><td style="border-radius:999px;background:#2563EB">
+    <a href="${href}" style="display:inline-block;padding:15px 30px;font:600 16px/1 ${FONT};color:#ffffff;text-decoration:none;border-radius:999px">${label}</a>
+  </td></tr></table>`;
+
 function layout(inner: string, foot: string) {
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#0d0d0d">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d0d0d"><tr><td align="center" style="padding:32px 16px">
+  return `<!doctype html><html><head><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light"></head>
+<body style="margin:0;padding:0;background:#F9F9F8">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F9F9F8"><tr><td align="center" style="padding:36px 16px">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
-    <tr><td style="padding:0 0 26px"><img src="${LOGO}" width="200" alt="BraticaFit" style="display:block;width:200px;height:auto;border:0"></td></tr>
-    <tr><td style="background:#171717;border:1px solid #2a2a2a;border-radius:16px;padding:28px 26px 10px">${inner}</td></tr>
-    <tr><td style="padding:18px 4px 0;font:12px/1.5 Arial,Helvetica,sans-serif;color:#8a8a8a">${foot}</td></tr>
+    <tr><td style="padding:0 0 24px"><img src="${LOGO}" width="200" alt="BraticaFit" style="display:block;width:200px;height:auto;border:0"></td></tr>
+    <tr><td style="background:#FFFFFF;border:1px solid #E8E8E4;border-radius:16px;padding:30px 28px 10px">${inner}</td></tr>
+    <tr><td style="padding:18px 4px 0;font:13px/1.5 ${FONT};color:#6B6B66">${foot}</td></tr>
   </table>
 </td></tr></table></body></html>`;
 }
 
 // Heads-up to Andrew when someone asks for access from the sign-in screen.
 export function renderAccessRequest(r: { name: string; email: string; note?: string | null }) {
-  const p = (t: string) => `<p style="margin:0 0 18px;font:16px/1.55 Arial,Helvetica,sans-serif;color:#eeeeee">${t}</p>`;
+  const p = para;
   const link = `${APP_URL}#coach=clients`;
   const inner = p(`<b>${esc(r.name)}</b> asked for access to BraticaFit.`) +
     p(`Email: ${esc(r.email)}`) +
     (r.note ? p(`Note: ${esc(r.note).replace(/\n/g, "<br>")}`) : "") +
-    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 22px"><tr><td style="border-radius:10px;background:#fb4311">
-      <a href="${link}" style="display:inline-block;padding:14px 26px;font:700 15px/1 Arial,Helvetica,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#ffffff;text-decoration:none">Review in coach mode</a>
-    </td></tr></table>`;
+    btn(link, "Review in coach mode");
   return {
     subject: `Access request: ${r.name}`,
     html: layout(inner, "Add them as a client or dismiss the request on your Clients page."),

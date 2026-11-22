@@ -150,15 +150,16 @@ $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-close
 // Sign in (6-digit email code)
 // ---------------------------------------------------------------------------
 function renderSignIn() {
-  delete document.documentElement.dataset.theme;  // sign-in looks the same for everyone
-  const mk = document.querySelector(".wordmark"); if (mk) mk.src = "icons/wordmark.webp";
+  document.documentElement.dataset.theme = "clarity";  // sign-in looks the same for everyone (not saved as their look)
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = "#F9F9F8";
+  const mk = document.querySelector(".wordmark"); if (mk) mk.src = "icons/wordmark-clarity.webp";
   $("#tabs").hidden = true;
   $("#settings").hidden = true;
   document.body.classList.add("signin");
   const preset = new URLSearchParams(location.search).get("email") || "";
   app.innerHTML = `
     <div class="auth">
-      <img class="auth-logo wide" src="icons/wordmark-lg.webp" alt="BraticaFit" width="320" height="122">
+      <img class="auth-logo wide" src="icons/wordmark-clarity.webp" alt="BraticaFit" width="300" height="53">
       <form id="f-email" class="auth-form">
         <p class="auth-head">Sign in</p>
         ${linkError ? `<p class="auth-msg">That sign-in link expired or was already used. Send yourself a fresh one.</p>`
