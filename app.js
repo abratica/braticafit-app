@@ -479,18 +479,14 @@ const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : 
 const embedSrc = (id, start = 0, autoplay = false) => (isVm(id)
   ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0${autoplay ? "&autoplay=1" : ""}${start ? `#t=${start}s` : ""}`
   : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1${autoplay ? "&autoplay=1" : ""}${start ? `&start=${start}` : ""}`);
-// "Watch on your TV": open the video in the YouTube app, whose cast button reaches Chromecast,
-// smart TVs with YouTube, and AirPlay TVs. Falls back to youtube.com if the app isn't there.
+// "Watch on your TV": open the video on YouTube, whose cast button reaches Chromecast,
+// smart TVs with YouTube, and AirPlay TVs.
 const TV_I = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" style="vertical-align:-4px;margin-right:6px"><rect x="3" y="5" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const tvButton = (id) => (!id || isVm(id) ? "" : `<button class="btn ghost block" data-tv="${esc(id)}" style="margin-top:10px">${TV_I}Watch on your TV</button>
-  <p class="small muted" style="margin:6px 2px 0">Opens YouTube. Tap the cast icon at the top of the video and pick your TV.</p>`);
+  <p class="small muted" style="margin:6px 2px 0">Opens YouTube. Tap the cast icon on the video and pick your TV. Works best with the YouTube app.</p>`);
 function openOnTv(id) {
-  const web = `https://www.youtube.com/watch?v=${id}`;
-  if (!/iPhone|iPad|iPod/.test(navigator.userAgent)) return void window.open(web, "_blank", "noopener");
-  // iPhone: the youtube:// link opens the app; if nothing happens (no app), open the website instead.
-  const t = setTimeout(() => { if (document.visibilityState === "visible") window.open(web, "_blank", "noopener"); }, 1600);
-  document.addEventListener("visibilitychange", () => clearTimeout(t), { once: true });
-  location.href = `youtube://www.youtube.com/watch?v=${id}`;
+  // A plain youtube.com link: opens the YouTube app when it's installed, otherwise YouTube in the browser.
+  window.open(`https://www.youtube.com/watch?v=${id}`, "_blank", "noopener");
 }
 document.addEventListener("click", (e) => { const b = e.target.closest("[data-tv]"); if (b) openOnTv(b.dataset.tv); });
 
