@@ -479,6 +479,21 @@ const ytThumb = (id) => (isVm(id) ? `https://vumbnail.com/${id.slice(3)}.jpg` : 
 const embedSrc = (id, start = 0, autoplay = false) => (isVm(id)
   ? `https://player.vimeo.com/video/${id.slice(3)}?dnt=1&playsinline=1&title=0&byline=0&portrait=0${autoplay ? "&autoplay=1" : ""}${start ? `#t=${start}s` : ""}`
   : `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1${autoplay ? "&autoplay=1" : ""}${start ? `&start=${start}` : ""}`);
+// "Watch on your TV": open the video in the YouTube app, whose cast button reaches Chromecast,
+// smart TVs with YouTube, and AirPlay TVs. Falls back to youtube.com if the app isn't there.
+const TV_I = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" style="vertical-align:-4px;margin-right:6px"><rect x="3" y="5" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const tvButton = (id) => (!id || isVm(id) ? "" : `<button class="btn ghost block" data-tv="${esc(id)}" style="margin-top:10px">${TV_I}Watch on your TV</button>
+  <p class="small muted" style="margin:6px 2px 0">Opens YouTube. Tap the cast icon at the top of the video and pick your TV.</p>`);
+function openOnTv(id) {
+  const web = `https://www.youtube.com/watch?v=${id}`;
+  if (!/iPhone|iPad|iPod/.test(navigator.userAgent)) return void window.open(web, "_blank", "noopener");
+  // iPhone: the youtube:// link opens the app; if nothing happens (no app), open the website instead.
+  const t = setTimeout(() => { if (document.visibilityState === "visible") window.open(web, "_blank", "noopener"); }, 1600);
+  document.addEventListener("visibilitychange", () => clearTimeout(t), { once: true });
+  location.href = `youtube://www.youtube.com/watch?v=${id}`;
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-tv]"); if (b) openOnTv(b.dataset.tv); });
+
 const player = (id, start = 0) => `<div class="player"><iframe src="${embedSrc(id, start)}"
   title="Workout video" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
 
@@ -944,7 +959,7 @@ async function openSession(id, opts = {}) {
       <div><div class="w-title">${esc(w.title)}</div><div class="small muted">${workoutMeta(w, list.length)}</div></div>
     </div>
     ${w.note ? `<h3>Coach note</h3><div class="card note">${esc(w.note)}</div>` : ""}
-    ${w.kind === "video" && w.video_id ? `<div style="margin-top:14px">${player(w.video_id)}</div>` : ""}
+    ${w.kind === "video" && w.video_id ? `<div style="margin-top:14px">${player(w.video_id)}${tvButton(w.video_id)}</div>` : ""}
     ${list.length ? `<h3>Exercises</h3>${exBlocks()}` : ""}
     ${w.completed_at
       ? `<div class="done-line" style="margin-top:16px">${ICO.check}<span>Done${w.feel ? ` · felt ${feelLabel(FEEL, w.feel).toLowerCase()}` : ""}</span></div>
