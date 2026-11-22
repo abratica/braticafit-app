@@ -1,6 +1,6 @@
 // App shell cache + push notifications.
-const CACHE = "psh-v36";
-const SHELL = ["./", "index.html", "styles.css?v=27", "app.js?v=33", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/logo.webp", "icons/wordmark.webp", "icons/wordmark-clarity.webp", "icons/wordmark-lg.webp"];
+const CACHE = "psh-v37";
+const SHELL = ["./", "index.html", "styles.css?v=27", "app.js?v=33", "manifest.webmanifest", "icons/icon-192-bf.png", "icons/icon-512-bf.png", "icons/logo.webp", "icons/wordmark.webp", "icons/wordmark-clarity.webp", "icons/wordmark-lg.webp"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -35,7 +35,7 @@ self.addEventListener("push", (e) => {
   e.waitUntil(
     self.registration.showNotification(data.title || "BraticaFit", {
       body: data.body || "",
-      icon: "icons/icon-192.png",
+      icon: "icons/icon-192-bf.png",
       badge: "icons/badge-96.png",
       tag: data.tag,
       renotify: !!data.tag,
