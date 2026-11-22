@@ -54,8 +54,56 @@ async function isAllowed(email: string): Promise<boolean> {
   return rows[0]?.ok === true;
 }
 
+// A "create your password" link for the welcome email. Reuses an unused, unexpired link for
+// the same email (so a resend doesn't break the first email), otherwise makes a new one.
+async function setupLink(email: string): Promise<string> {
+  const open = await sql`select token from private.setup_links
+                         where email = ${email} and used_at is null and expires_at > now() + interval '7 days'
+                         order by created_at desc limit 1`;
+  let token = open[0]?.token as string | undefined;
+  if (!token) {
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    token = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    await sql`insert into private.setup_links (token, email) values (${token}, ${email})`;
+  }
+  return `${APP_URL}?setup=${token}`;
+}
+
+async function findSetup(token: unknown) {
+  const t = String(token ?? "").trim();
+  if (!/^[\w-]{20,64}$/.test(t)) return null;
+  const rows = await sql`select token, email, used_at, expires_at < now() as expired from private.setup_links where token = ${t}`;
+  return rows[0] ?? null;
+}
+
+const MIN_PASSWORD = 8;
+
 // Actions anyone can call from the sign-in screen.
 async function publicAction(body: Record<string, unknown>): Promise<Response | null> {
+  if (body.action === "setup_info") {
+    // What the Create password screen needs: whose link this is, and whether it still works.
+    const s = await findSetup(body.token);
+    if (!s) return json({ status: "invalid" });
+    if (s.used_at) return json({ status: "used", email: s.email });
+    if (s.expired || !(await isAllowed(s.email))) return json({ status: "expired", email: s.email });
+    return json({ status: "ok", email: s.email });
+  }
+  if (body.action === "set_password") {
+    const s = await findSetup(body.token);
+    if (!s) return json({ error: "That link isn't valid. Use Forgot password on the sign-in screen." }, 400);
+    if (s.used_at) return json({ error: "You already made a password. Sign in with it, or use Forgot password." }, 400);
+    if (s.expired || !(await isAllowed(s.email))) return json({ error: "That link expired. Use Forgot password on the sign-in screen." }, 400);
+    const password = String(body.password ?? "");
+    if (password.length < MIN_PASSWORD) return json({ error: `Use at least ${MIN_PASSWORD} characters` }, 400);
+    if (password.length > 72) return json({ error: "That password is too long" }, 400);
+    const existing = await sql`select id from auth.users where lower(email) = ${s.email} limit 1`;
+    const { error } = existing.length
+      ? await admin.auth.admin.updateUserById(existing[0].id, { password, email_confirm: true })
+      : await admin.auth.admin.createUser({ email: s.email, password, email_confirm: true });
+    if (error) return json({ error: /weak|pwned|known/i.test(error.message) ? "That password is too easy to guess. Try another." : error.message }, 400);
+    await sql`update private.setup_links set used_at = now() where email = ${s.email} and used_at is null`;
+    return json({ ok: true, email: s.email });
+  }
   if (body.action === "send_link") {
     const email = cleanEmail(body.email);
     if (!EMAIL_RE.test(email)) return json({ error: "Enter a valid email" }, 400);
@@ -161,12 +209,13 @@ Deno.serve(async (req) => {
         const tpl = { subject: saved.welcome_subject ?? DEFAULT_WELCOME.subject, body: saved.welcome_body ?? DEFAULT_WELCOME.body };
         if (body.test) {
           if (!me.email) return json({ error: "No email on your account" }, 400);
-          await sendEmail(me.email, renderWelcome(tpl, "Andrew", me.email));
+          // The test copy's button really works: it sets (or resets) the coach's own password.
+          await sendEmail(me.email, renderWelcome(tpl, "Andrew", me.email, await setupLink(me.email.toLowerCase())));
           return json({ sent: me.email });
         }
         const m = await sql`select id, email, name from public.members where id = ${body.member_id ?? null}`;
         if (!m.length) return json({ error: "Client not found" }, 404);
-        await sendEmail(m[0].email, renderWelcome(tpl, m[0].name ?? "", m[0].email));
+        await sendEmail(m[0].email, renderWelcome(tpl, m[0].name ?? "", m[0].email, await setupLink(m[0].email)));
         await sql`update public.members set welcomed_at = now() where id = ${m[0].id}`;
         return json({ sent: m[0].email });
       }

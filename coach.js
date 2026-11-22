@@ -234,7 +234,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
     return `<section class="c-card">
         <div class="c-card-head"><h3>Welcome email</h3><button class="c-link" id="c-mail-toggle">${M.open ? "Close" : "Edit"}</button></div>
         <p class="c-vm" style="margin:0">${M.configured ? "Sent from andrew@braticafit.com when you add a client." : "Email isn't connected yet. Your wording saves now and sends once it is."}
-          Use <b>{first name}</b> for their name and <b>{button}</b> for the Open BraticaFit button.</p>
+          Use <b>{first name}</b> for their name and <b>{button}</b> for the Create your password button.</p>
         ${M.open ? `<form id="c-mail" class="c-mail">
           <label><span>Subject</span><input id="c-mail-subject" value="${esc(M.subject)}" required></label>
           <label><span>Message</span><textarea id="c-mail-body" rows="11" required>${esc(M.body)}</textarea></label>
@@ -271,7 +271,7 @@ export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) 
           <button class="btn primary">Add</button>
         </form>
         <label class="c-check"><input type="checkbox" id="c-add-welcome" ${st.mail.configured ? "checked" : "disabled"}> Send them the welcome email</label>
-        <p class="c-vm" style="margin:8px 0 0">They sign in at the app with this email. Until you add them, that email can't get in.</p>
+        <p class="c-vm" style="margin:8px 0 0">The welcome email lets them create a password, then they sign in with this email. Until you add them, that email can't get in.</p>
       </section>
       ${mailCard()}
       <section class="c-card">

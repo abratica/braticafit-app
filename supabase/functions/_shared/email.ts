@@ -13,9 +13,11 @@ export const DEFAULT_WELCOME = {
 
 You're in. This is where your workouts, food log, and check-ins with me will live.
 
+Tap the button to create your password. On your phone, the app will then show you how to add it to your home screen.
+
 {button}
 
-On your phone, add it to your home screen so it works like an app. Then open it and sign in with this email. You'll get a 6-digit code to type in.
+After that, open BraticaFit from your home screen and sign in with this email and your new password.
 
 Talk soon,
 Andrew`,
@@ -29,17 +31,16 @@ export function emailConfigured() {
 }
 
 // Fill in {first name} and turn the plain-text body into the branded HTML email.
-// The button opens the app with their email filled in; they sign in there with a 6-digit code,
-// so on iPhone they end up signed in inside the home-screen app, not just in Safari.
-export function renderWelcome(tpl: { subject: string; body: string }, name: string, email: string) {
+// The button opens the Create password screen (link = the setup link made for this email).
+// After that they sign in with email + password, which works inside the iPhone home-screen app.
+export function renderWelcome(tpl: { subject: string; body: string }, name: string, email: string, link: string) {
   const first = (name || "").trim().split(/\s+/)[0] || "there";
   const fill = (s: string) => s.replace(/\{\s*first name\s*\}/gi, first);
-  const link = `${APP_URL}?email=${encodeURIComponent(email)}`;
   const subject = fill(tpl.subject).trim() || "Welcome to BraticaFit";
   let body = fill(tpl.body).replace(/\r\n/g, "\n").trim();
   if (!/\{\s*button\s*\}/i.test(body)) body += "\n\n{button}";
 
-  const button = btn(link, "Open BraticaFit");
+  const button = btn(link, "Create your password");
 
   const blocks = body.split(/\n{2,}/).map((p) =>
     /^\s*\{\s*button\s*\}\s*$/i.test(p)
@@ -47,8 +48,8 @@ export function renderWelcome(tpl: { subject: string; body: string }, name: stri
       : para(esc(p).replace(/\n/g, "<br>"))
   ).join("\n");
 
-  const html = layout(blocks, `Button not working? Open ${esc(APP_URL)} and sign in with ${esc(email)}.`);
-  const text = body.replace(/\{\s*button\s*\}/gi, `Open BraticaFit: ${link}`);
+  const html = layout(blocks, `Button not working? Open ${esc(APP_URL)}, tap Forgot password, and use ${esc(email)}.`);
+  const text = body.replace(/\{\s*button\s*\}/gi, `Create your password: ${link}`);
   return { subject, html, text };
 }
 

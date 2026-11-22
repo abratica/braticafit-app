@@ -147,36 +147,124 @@ function closeSheet() {
 $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeSheet(); });
 
 // ---------------------------------------------------------------------------
-// Sign in (6-digit email code)
+// Sign in (email + password; "Forgot password?" emails a 6-digit code, then they make a new one)
 // ---------------------------------------------------------------------------
-function renderSignIn() {
-  document.documentElement.dataset.theme = "clarity";  // sign-in looks the same for everyone (not saved as their look)
+// The welcome email links to ?setup=<token>: the Create password screen.
+let setupToken = new URLSearchParams(location.search).get("setup");
+// What to show right after signing in: "install" (add to home screen) or "newpw" (make a new password).
+let afterSignIn = null;
+function dropSetupFromUrl() {
+  setupToken = null;
+  const p = new URLSearchParams(location.search); p.delete("setup"); p.delete("email");
+  history.replaceState(null, "", location.pathname + (p.toString() ? `?${p}` : "") + location.hash);
+}
+
+// Sign-in screens look the same for everyone (Clarity), with no tabs.
+function authShell() {
+  document.documentElement.dataset.theme = "clarity";  // not saved as their look
   const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = "#F9F9F8";
   const mk = document.querySelector(".wordmark"); if (mk) mk.src = "icons/wordmark-clarity.webp";
   $("#tabs").hidden = true;
   $("#settings").hidden = true;
   document.body.classList.add("signin");
-  const preset = new URLSearchParams(location.search).get("email") || "";
+}
+const AUTH_LOGO = `<img class="auth-logo wide" src="icons/wordmark-clarity.webp" alt="BraticaFit" width="300" height="53">`;
+const MIN_PW = 8;
+// Password box with a Show/Hide button (easier than typing it twice).
+const pwField = (id, autocomplete, placeholder = "") => `<div class="auth-pw">
+    <input class="auth-input" id="${id}" type="password" autocomplete="${autocomplete}" placeholder="${placeholder}" required>
+    <button type="button" class="auth-eye" data-eye="${id}">Show</button></div>`;
+function wireEyes(root = app) {
+  root.querySelectorAll("[data-eye]").forEach((b) => b.addEventListener("click", () => {
+    const i = $("#" + b.dataset.eye); const show = i.type === "password";
+    i.type = show ? "text" : "password"; b.textContent = show ? "Hide" : "Show";
+  }));
+}
+// signInWithPassword / verifyOtp fire onAuthStateChange, which calls enter(). If the same account
+// was already signed in on this browser it doesn't, so call enter() ourselves.
+function enterAfter(prevId, session) {
+  if (session?.user?.id === prevId) enter(session);
+}
+
+// Create password (from the welcome email link)
+async function renderSetup() {
+  authShell();
+  const token = setupToken;
+  app.innerHTML = `<div class="auth">${AUTH_LOGO}<p class="auth-sub">Loading…</p></div>`;
+  let info;
+  try { info = await api("setup_info", { token }); } catch { info = { status: "error" }; }
+  const toSignIn = (email) => { dropSetupFromUrl(); renderSignIn(email); };
+  if (info.status !== "ok") {
+    const msg = {
+      used: ["You already have a password", "Sign in with your email and password. Forgot it? Tap Forgot password on the next screen."],
+      expired: ["This link expired", "No problem. On the next screen, enter your email and tap Forgot password to make one."],
+    }[info.status] ?? ["This link doesn't work", "On the next screen, enter your email and tap Forgot password to make a password."];
+    app.innerHTML = `<div class="auth">${AUTH_LOGO}<div class="auth-form">
+        <p class="auth-head">${msg[0]}</p><p class="auth-sub">${msg[1]}</p>
+        <button class="auth-btn" id="go-in">Go to sign in</button></div></div>`;
+    $("#go-in").addEventListener("click", () => toSignIn(info.email));
+    return;
+  }
+  app.innerHTML = `<div class="auth">${AUTH_LOGO}
+    <form id="f-setup" class="auth-form">
+      <p class="auth-head">Create your password</p>
+      <p class="auth-sub">You'll use it with your email to sign in.</p>
+      <label class="auth-label" for="su-email">Email</label>
+      <input class="auth-input auth-locked" id="su-email" type="email" autocomplete="username" value="${esc(info.email)}" readonly>
+      <label class="auth-label" for="su-pw" style="margin-top:14px">Password</label>
+      ${pwField("su-pw", "new-password")}
+      <p class="auth-fine" style="margin:8px 0 0">At least ${MIN_PW} characters.</p>
+      <button class="auth-btn">Create password</button>
+    </form></div>`;
+  wireEyes();
+  $("#su-pw").focus();
+  $("#f-setup").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const password = $("#su-pw").value;
+    if (password.length < MIN_PW) return toast(`Use at least ${MIN_PW} characters`);
+    const b = $("#f-setup .auth-btn"); b.disabled = true; b.textContent = "Saving…";
+    try {
+      await api("set_password", { token, password });
+      dropSetupFromUrl();
+      afterSignIn = "install";
+      const prev = lastUserId;
+      const { data, error } = await db.auth.signInWithPassword({ email: info.email, password });
+      if (error) throw error;
+      enterAfter(prev, data.session);
+    } catch (err) {
+      afterSignIn = null;
+      b.disabled = false; b.textContent = "Create password";
+      toast(err.message);
+    }
+  });
+}
+
+function renderSignIn(presetEmail) {
+  authShell();
+  const preset = presetEmail || new URLSearchParams(location.search).get("email") || "";
   app.innerHTML = `
     <div class="auth">
-      <img class="auth-logo wide" src="icons/wordmark-clarity.webp" alt="BraticaFit" width="300" height="53">
-      <form id="f-email" class="auth-form">
+      ${AUTH_LOGO}
+      <form id="f-pw" class="auth-form">
         <p class="auth-head">Sign in</p>
         ${iosInstallTip()}
-        ${linkError ? `<p class="auth-msg">That sign-in link expired or was already used. Send yourself a fresh one.</p>`
+        ${linkError ? `<p class="auth-msg">That sign-in link expired or was already used. Sign in below, or tap Forgot password.</p>`
           : `<p class="auth-sub">Use the email Andrew added you with.</p>`}
         <label class="auth-label" for="email">Email</label>
-        <input class="auth-input" id="email" type="email" autocomplete="email" placeholder="you@email.com" required value="${esc(preset)}">
-        <button class="auth-btn">Email me a code</button>
+        <input class="auth-input" id="email" type="email" autocomplete="username" placeholder="you@email.com" required value="${esc(preset)}">
+        <label class="auth-label" for="pw" style="margin-top:14px">Password</label>
+        ${pwField("pw", "current-password")}
+        <button class="auth-btn">Sign in</button>
+        <p class="auth-fine" style="margin-top:14px;text-align:center"><button type="button" class="auth-link" id="forgot">Forgot password?</button></p>
       </form>
       <form id="sent" class="auth-form" hidden>
         <p class="auth-head">Check your email</p>
-        <p class="auth-sub">Enter the 6-digit code sent to <span id="sent-email"></span>.</p>
+        <p class="auth-sub">Enter the 6-digit code sent to <span id="sent-email"></span>. Then you'll make a new password.</p>
         <label class="auth-label" for="code">Code</label>
         <input class="auth-input auth-code" id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" placeholder="123456" required>
-        <button class="auth-btn">Sign in</button>
+        <button class="auth-btn">Continue</button>
         <p class="auth-fine" style="margin-top:14px">Didn't get it? Check spam, or <button type="button" class="auth-link" id="resend">send a new code</button>.
-          <br><button type="button" class="auth-link" id="sent-back">Use a different email</button></p>
+          <br><button type="button" class="auth-link" id="sent-back">Back to sign in</button></p>
       </form>
       <form id="f-req" class="auth-form" hidden>
         <p class="auth-head">Not on the list yet</p>
@@ -190,15 +278,28 @@ function renderSignIn() {
       </form>
       <div id="req-done" class="auth-sent" hidden>
         <p class="auth-head">Request sent</p>
-        <p>Andrew will get your request. Once he adds you, you'll get a welcome email that signs you right in.</p>
+        <p>Andrew will get your request. Once he adds you, you'll get a welcome email to create your password.</p>
       </div>
     </div>`;
-  const show = (id) => { for (const k of ["f-email", "sent", "f-req", "req-done"]) $("#" + k).hidden = k !== id; };
+  wireEyes();
+  const show = (id) => { for (const k of ["f-pw", "sent", "f-req", "req-done"]) $("#" + k).hidden = k !== id; };
   const email = () => $("#email").value.trim().toLowerCase();
   const busy = (form, on, label) => { const b = $(`#${form} .auth-btn`); b.disabled = on; if (label) b.textContent = label; };
+  (preset ? $("#pw") : $("#email")).focus();
 
+  $("#f-pw").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    busy("f-pw", true, "Signing in…");
+    const { error } = await db.auth.signInWithPassword({ email: email(), password: $("#pw").value });
+    if (error) {
+      busy("f-pw", false, "Sign in");
+      return toast(/invalid/i.test(error.message) ? "Wrong email or password. Try again, or tap Forgot password." : error.message, 4000);
+    }
+    // onAuthStateChange takes it from here.
+  });
+
+  // Forgot password: email a 6-digit code (works inside the iPhone home-screen app), then make a new password.
   const send = async () => {
-    busy("f-email", true, "Sending…");
     try {
       const r = await api("send_link", { email: email() });
       if (r.allowed === false) {
@@ -211,27 +312,34 @@ function renderSignIn() {
         $("#code").value = "";
         $("#code").focus();
       }
-    } catch (e) { toast(e.message); }
-    busy("f-email", false, "Email me a code");
+      return true;
+    } catch (e) { toast(e.message); return false; }
   };
-  $("#f-email").addEventListener("submit", (e) => { e.preventDefault(); send(); });
-  $("#resend").addEventListener("click", async () => { await send(); toast("New code sent"); });
-  $("#sent-back").addEventListener("click", () => { show("f-email"); $("#email").focus(); });
+  $("#forgot").addEventListener("click", async (e) => {
+    if (!$("#email").checkValidity() || !email()) { toast("Enter your email first"); return $("#email").focus(); }
+    e.target.disabled = true;
+    await send();
+    e.target.disabled = false;
+  });
+  $("#resend").addEventListener("click", async () => { if (await send()) toast("New code sent"); });
+  $("#sent-back").addEventListener("click", () => { show("f-pw"); $("#pw").focus(); });
   $("#sent").addEventListener("submit", async (e) => {
     e.preventDefault();
     const token = $("#code").value.replace(/\D/g, "");
     if (token.length < 6) return toast("Enter the 6-digit code");
-    busy("sent", true, "Signing in…");
+    busy("sent", true, "Checking…");
+    afterSignIn = "newpw";
     const { error } = await db.auth.verifyOtp({ email: email(), token, type: "email" });
     if (error) {
-      busy("sent", false, "Sign in");
+      afterSignIn = null;
+      busy("sent", false, "Continue");
       return toast(/expired|invalid/i.test(error.message) ? "That code didn't work. Check it, or send a new one." : error.message);
     }
     // onAuthStateChange takes it from here.
   });
-  // Pasting or auto-filling the whole code signs in right away.
+  // Pasting or auto-filling the whole code continues right away.
   $("#code").addEventListener("input", (e) => { if (e.target.value.replace(/\D/g, "").length === 6) $("#sent").requestSubmit(); });
-  $("#req-back").addEventListener("click", () => { show("f-email"); $("#email").focus(); });
+  $("#req-back").addEventListener("click", () => { show("f-pw"); $("#email").focus(); });
   $("#f-req").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("#req-name").value.trim();
@@ -239,11 +347,77 @@ function renderSignIn() {
     busy("f-req", true, "Sending…");
     try {
       const r = await api("request_access", { email: email(), name, note: $("#req-note").value });
-      if (r.allowed) return send();
+      if (r.allowed) { busy("f-req", false, "Request access"); return send(); }
       show("req-done");
     } catch (err) { toast(err.message); }
     busy("f-req", false, "Request access");
   });
+}
+
+// After "Forgot password?": signed in with the code, now make a new password.
+function renderNewPassword(session) {
+  authShell();
+  const mail = session.user.email ?? "";
+  app.innerHTML = `<div class="auth">${AUTH_LOGO}
+    <form id="f-newpw" class="auth-form">
+      <p class="auth-head">Make a new password</p>
+      <p class="auth-sub">For <span>${esc(mail)}</span>. Use it with your email next time you sign in.</p>
+      <input type="email" autocomplete="username" value="${esc(mail)}" hidden readonly>
+      <label class="auth-label" for="np-pw">New password</label>
+      ${pwField("np-pw", "new-password")}
+      <p class="auth-fine" style="margin:8px 0 0">At least ${MIN_PW} characters.</p>
+      <button class="auth-btn">Save password</button>
+      <p class="auth-fine" style="margin-top:14px;text-align:center"><button type="button" class="auth-link" id="np-skip">Skip for now</button></p>
+    </form></div>`;
+  wireEyes();
+  $("#np-pw").focus();
+  const done = () => { afterSignIn = "install"; enter(session); };
+  $("#np-skip").addEventListener("click", done);
+  $("#f-newpw").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const password = $("#np-pw").value;
+    if (password.length < MIN_PW) return toast(`Use at least ${MIN_PW} characters`);
+    const b = $("#f-newpw .auth-btn"); b.disabled = true; b.textContent = "Saving…";
+    const { error } = await db.auth.updateUser({ password });
+    if (error && !/different from the old/i.test(error.message)) {
+      b.disabled = false; b.textContent = "Save password";
+      return toast(/weak|pwned|known/i.test(error.message) ? "That password is too easy to guess. Try another." : error.message);
+    }
+    toast("Password saved");
+    done();
+  });
+}
+
+// Right after making a password on a phone browser: how to put the app on the home screen.
+// On iPhone the home-screen app has its own sign-in, separate from Safari, so they sign in there once.
+const installStepNeeded = () => !standalone() && (isIOS() || (deferredInstall && /Android/i.test(navigator.userAgent)));
+function renderInstallStep(session) {
+  authShell();
+  const mail = esc(session.user.email ?? "");
+  const later = `<p class="auth-fine" style="margin-top:16px;text-align:center"><button type="button" class="auth-link" id="inst-later">Keep using it in the browser for now</button></p>`;
+  if (isIOS()) {
+    app.innerHTML = `<div class="auth">${AUTH_LOGO}<div class="auth-form">
+      <p class="auth-head">You're all set. Last step:</p>
+      <p class="auth-sub">Add BraticaFit to your home screen so it opens like an app.</p>
+      <ol class="auth-steps">
+        <li>Tap the Share button ${SHARE_I} at the bottom of the screen.
+          <span class="auth-fine">Don't see it? Tap the compass or <b>Open in Safari</b> first.</span></li>
+        <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+        <li>Open BraticaFit from your home screen and sign in with <b>${mail}</b> and your new password.</li>
+      </ol>
+      ${later}</div></div>`;
+  } else {
+    app.innerHTML = `<div class="auth">${AUTH_LOGO}<div class="auth-form">
+      <p class="auth-head">You're all set. Last step:</p>
+      <p class="auth-sub">Install BraticaFit so it opens like an app from your home screen. You'll stay signed in.</p>
+      <button class="auth-btn" id="inst-go">Install the app</button>
+      ${later}</div></div>`;
+    $("#inst-go").addEventListener("click", async () => {
+      if (deferredInstall) { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; }
+      enter(session);
+    });
+  }
+  $("#inst-later").addEventListener("click", () => enter(session));
 }
 
 // ---------------------------------------------------------------------------
@@ -2453,7 +2627,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=15");
+    const m = await import("./coach.js?v=16");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }
@@ -2472,7 +2646,10 @@ navigator.serviceWorker?.addEventListener("message", (e) => {
 // ---------------------------------------------------------------------------
 async function enter(session) {
   user = session?.user ?? null;
+  if (setupToken) return renderSetup();
   if (!user) return renderSignIn();
+  if (afterSignIn === "newpw") { afterSignIn = null; return renderNewPassword(session); }
+  if (afterSignIn === "install") { afterSignIn = null; if (installStepNeeded()) return renderInstallStep(session); }
   document.body.classList.remove("signin");
   const { data: role, error } = await db.rpc("join_app");
   if (error || !role) {
