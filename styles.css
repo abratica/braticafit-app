@@ -470,26 +470,36 @@ a.btn.primary { color: var(--accent-ink); }
 /* Interval timer */
 .iv-moves { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .iv-moves span { font-size: 13px; padding: 5px 10px; border-radius: 999px; background: var(--chip); }
-#iv { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-  padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom)); text-align: center;
-  background: #161616; color: #f2efe9; transition: background .25s; }
-#iv.prep { background: #26221d; }
-#iv.work { background: var(--accent); }
-#iv.rest { background: #14202a; }
-#iv.done { background: #0d0d0d; }
-#iv.paused { filter: saturate(.4); }
-#iv .iv-x { position: absolute; top: calc(16px + env(safe-area-inset-top)); right: 16px; width: 44px; height: 44px; border-radius: 50%;
-  border: 0; background: rgba(0,0,0,.25); color: inherit; font-size: 18px; cursor: pointer; }
-#iv .iv-phase { font: 600 22px/1 var(--display); letter-spacing: .24em; text-transform: uppercase; opacity: .9; }
-#iv .iv-time { font: 600 min(34vw, 180px)/1 var(--display); letter-spacing: .02em; font-variant-numeric: tabular-nums; }
-#iv .iv-move { font: 600 26px/1.2 var(--display); max-width: 90vw; }
-#iv .iv-round { font-size: 15px; opacity: .85; }
-#iv .iv-bar { width: min(420px, 80vw); height: 6px; border-radius: 3px; background: rgba(0,0,0,.25); overflow: hidden; margin-top: 8px; }
-#iv .iv-bar div { height: 100%; background: #f2efe9; transition: width .2s linear; }
-#iv .iv-ctl { display: flex; gap: 12px; margin-top: 22px; }
-#iv .iv-ctl button { min-width: 120px; height: 52px; border-radius: 14px; border: 2px solid currentColor; background: transparent; color: inherit;
-  font: 600 16px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
-#iv .iv-ctl button.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+#iv { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 14px;
+  padding: calc(18px + env(safe-area-inset-top)) 20px calc(18px + env(safe-area-inset-bottom)); text-align: center;
+  background: #161616; color: #fff; transition: background .3s; --iv-c: #fff; }
+#iv.prep { background: #2563EB; }
+#iv.work { background: #16A34A; }
+#iv.rest { background: #DC2626; }
+#iv.done { background: #0d0d0d; justify-content: center; }
+#iv.paused { filter: saturate(.55) brightness(.9); }
+#iv .iv-x { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%;
+  border: 0; background: rgba(0,0,0,.2); color: inherit; font-size: 18px; cursor: pointer; }
+#iv .iv-phase { font: 700 26px/1.2 Inter, sans-serif; margin-top: 6px; }
+#iv .iv-ring { position: relative; width: min(82vw, 52vh, 420px); aspect-ratio: 1; display: grid; place-items: center; }
+#iv .iv-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+#iv .iv-track { fill: none; stroke: rgba(0,0,0,.18); stroke-width: 7; }
+#iv .iv-arc { fill: none; stroke: #fff; stroke-width: 7; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; transition: stroke-dashoffset .2s linear; }
+#iv .iv-time { position: relative; font: 800 min(34vw, 21vh, 170px)/1 Inter, sans-serif; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+#iv .iv-time.long { font-size: min(22vw, 14vh, 110px); }
+#iv .iv-move { font: 700 26px/1.2 Inter, sans-serif; max-width: 90vw; min-height: 1.2em; }
+#iv .iv-boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 460px); }
+#iv .iv-boxes > div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: 14px; background: rgba(0,0,0,.16); }
+#iv .iv-boxes b { font: 700 32px/1.1 Inter, sans-serif; font-variant-numeric: tabular-nums; }
+#iv .iv-boxes span { font-size: 14px; opacity: .9; }
+#iv .iv-ctl { display: flex; align-items: center; justify-content: space-between; width: min(100%, 460px); }
+#iv .iv-ctl button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 64px; min-height: 64px;
+  border: 0; background: none; color: inherit; font: 600 15px/1 Inter, sans-serif; cursor: pointer; }
+#iv .iv-ctl .iv-main { min-width: 96px; }
+#iv.done .iv-ctl { justify-content: center; margin-top: 24px; }
+#iv.done .iv-phase { font-size: 22px; letter-spacing: .2em; text-transform: uppercase; }
+#iv.done .iv-time { font-size: min(34vw, 170px); }
+#iv .iv-ctl button.solid { min-height: 52px; padding: 0 22px; border-radius: 999px; background: #2563EB; color: #fff; font-size: 16px; }
 
 /* Move a workout to another day */
 .move-row { display: flex; gap: 10px; align-items: flex-end; margin-top: 16px; }

@@ -980,14 +980,22 @@ async function runIntervals(x, onDone) {
 
   const el = document.createElement("div");
   el.id = "iv";
+  const PAUSE_I = `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>`;
+  const PLAY_I = `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>`;
   el.innerHTML = `
     <button class="iv-x" data-ivc="end" aria-label="End intervals">✕</button>
     <div class="iv-phase"></div>
-    <div class="iv-time"></div>
+    <div class="iv-ring">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><circle class="iv-track" cx="50" cy="50" r="44"/><circle class="iv-arc" cx="50" cy="50" r="44" pathLength="100"/></svg>
+      <div class="iv-time" role="timer"></div>
+    </div>
     <div class="iv-move"></div>
-    <div class="iv-round"></div>
-    <div class="iv-bar"><div></div></div>
-    <div class="iv-ctl"><button data-ivc="pause">Pause</button><button data-ivc="skip">Skip ›</button></div>`;
+    <div class="iv-boxes"><div><b class="iv-b1"></b><span class="iv-l1"></span></div><div><b class="iv-b2"></b><span class="iv-l2"></span></div></div>
+    <div class="iv-ctl">
+      <button data-ivc="back" aria-label="Back"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M11.5 6v12L3 12zM21 6v12l-8.5-6z" fill="currentColor"/></svg></button>
+      <button data-ivc="pause" class="iv-main" aria-label="Pause">${PAUSE_I}<span>Pause</span></button>
+      <button data-ivc="skip" aria-label="Skip"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M12.5 6v12L21 12zM3 6v12l8.5-6z" fill="currentColor"/></svg></button>
+    </div>`;
   document.body.appendChild(el);
   document.body.style.overflow = "hidden";
 
@@ -1025,18 +1033,31 @@ async function runIntervals(x, onDone) {
     try { navigator.vibrate?.(phases[idx].kind === "work" ? 250 : 120); } catch {}
     draw();
   };
+  let shown = "";
   const draw = () => {
     const p = phases[idx];
     const left = paused ?? Math.max(0, Math.ceil((end - Date.now()) / 1000));
     el.className = (p.kind === "break" ? "rest" : p.kind) + (paused != null ? " paused" : "");
     $(".iv-phase", el).textContent = paused != null ? "Paused" : { work: "Work", rest: "Rest", break: "Round break", prep: "Get ready" }[p.kind];
-    $(".iv-time", el).textContent = fmtClock(left);
+    $(".iv-time", el).textContent = left >= 60 ? fmtClock(left) : String(left);
+    $(".iv-time", el).classList.toggle("long", left >= 60);
+    const done = paused != null ? 1 - paused / p.sec : 1 - Math.max(0, end - Date.now()) / (p.sec * 1000);
+    $(".iv-arc", el).style.strokeDashoffset = String(100 - Math.min(100, done * 100));
     $(".iv-move", el).textContent = p.kind === "work" ? p.move : `Next: ${p.move}`;
-    $(".iv-round", el).textContent = circuit
-      ? (p.kind === "break" ? `Round ${p.round} of ${v.rounds} up next` : `Round ${p.round} of ${v.rounds} · Exercise ${p.ex} of ${moves.length}`)
-      : `Round ${p.round} of ${v.rounds}`;
-    $(".iv-bar div", el).style.width = `${(1 - left / p.sec) * 100}%`;
-    $('[data-ivc="pause"]', el).textContent = paused != null ? "Resume" : "Pause";
+    $(".iv-b1", el).textContent = `${p.round}/${v.rounds}`;
+    $(".iv-l1", el).textContent = "Round";
+    if (circuit) { $(".iv-b2", el).textContent = `${p.ex}/${moves.length}`; $(".iv-l2", el).textContent = "Exercise"; }
+    else {
+      const rest = phases.slice(idx + 1).reduce((n, q) => n + q.sec, 0) + left;
+      $(".iv-b2", el).textContent = fmtClock(rest); $(".iv-l2", el).textContent = "Left";
+    }
+    const state = paused != null ? "play" : "pause";
+    if (shown !== state) {
+      shown = state;
+      const pb = $('[data-ivc="pause"]', el);
+      pb.innerHTML = state === "play" ? `${PLAY_I}<span>Resume</span>` : `${PAUSE_I}<span>Pause</span>`;
+      pb.setAttribute("aria-label", state === "play" ? "Resume" : "Pause");
+    }
     if (paused == null) {
       if (left <= 3 && left > 0 && lastBeep !== left) { lastBeep = left; beep(880, 0.1); }
       if (left === 0) go(idx + 1);
@@ -1049,6 +1070,12 @@ async function runIntervals(x, onDone) {
     if (c === "close") return close();
     if (c === "end") return finish(false);
     if (c === "skip") { paused = null; return go(idx + 1); }
+    if (c === "back") {
+      // Restart this part, or go to the one before if it just started.
+      const into = phases[idx].sec - (paused ?? Math.max(0, Math.ceil((end - Date.now()) / 1000)));
+      paused = null;
+      return go(into > 2 || idx === 0 ? idx : idx - 1);
+    }
     if (c === "pause") {
       if (paused == null) paused = Math.max(0, Math.ceil((end - Date.now()) / 1000));
       else { end = Date.now() + paused * 1000; paused = null; }
