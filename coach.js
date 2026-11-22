@@ -1,7 +1,7 @@
 // BraticaFit coach mode. Loaded only after the database confirms the signed-in account is the coach,
 // so client devices never download this file in normal use.
 
-import { createTrain } from "./coach-train.js?v=8";
+import { createTrain } from "./coach-train.js?v=9";
 import { createInbox } from "./coach-inbox.js?v=2";
 import { createCalls } from "./coach-calls.js?v=1";
 
@@ -111,7 +111,7 @@ const IC = {
 export async function openCoach({ db, user, esc, toast, ymd, api, view, exit }) {
   if (!document.querySelector('link[data-coach]')) {
     const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = "coach.css?v=10"; l.dataset.coach = "1";
+    l.rel = "stylesheet"; l.href = "coach.css?v=11"; l.dataset.coach = "1";
     document.head.appendChild(l);
   }
   document.body.classList.add("coach-on");

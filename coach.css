@@ -329,7 +329,8 @@ body > .c-modal { z-index: 75; }
 .bb-move button, .bb-x { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; display: grid; place-items: center; }
 .bb-x:hover { color: var(--warn); border-color: var(--warn); }
 .bb-r2 { display: grid; grid-template-columns: 70px 90px 100px 130px minmax(160px, 1fr); gap: 8px; }
-.bb.iv .bb-r2 { grid-template-columns: 90px 90px 90px minmax(200px, 1fr); }
+.bb.iv .bb-r2 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.bb.iv .bb-r2 .wide { grid-column: 1 / -1; }
 .bb-r2 label span { display: block; font: 500 10px/1 var(--display); text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin-bottom: 5px; }
 .bb-r2 input, .bb-r2 select { width: 100%; box-sizing: border-box; height: 38px; padding: 0 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); color: var(--ink); font: 14px Inter, sans-serif; }
 .bb-r2 input:focus, .bb-r2 select:focus { outline: none; border-color: var(--accent); }

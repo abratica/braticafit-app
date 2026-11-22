@@ -428,7 +428,11 @@ async function renderHome() {
       <span class="small muted">${recapDone ? "Tap to add more" : "Talk for about a minute"}</span></span>
     </button>`;
 
-  app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openSession(b.dataset.open)));
+  app.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => {
+    const start = b.classList.contains("start");
+    if (start) primeAudio();
+    openSession(b.dataset.open, { autoStart: start });
+  }));
   $("#plan")?.addEventListener("click", () => openPlanner());
   $("#recap").addEventListener("click", openRecap);
   showInstallBar();
@@ -667,7 +671,7 @@ function parseExercises(text) {
 // ---------------------------------------------------------------------------
 // Workout session: video player, or written exercises with sets to check off
 // ---------------------------------------------------------------------------
-async function openSession(id) {
+async function openSession(id, opts = {}) {
   const back = tab === "today" ? "today" : "train";
   sessionBack = back;
   const [{ data: w }, { data: exs }] = await Promise.all([
@@ -690,10 +694,11 @@ async function openSession(id) {
   const exInner = (x, i) => {
     if (x.interval) {
       const v = x.interval, done = !!x.sets?.[0]?.done;
-      const total = v.rounds * v.work + (v.rounds - 1) * v.rest;
+      const { total, circuit } = ivPhases(v);
+      const rr = circuit && v.rounds > 1 && (v.round_rest ?? v.rest) !== v.rest ? ` · ${fmtRest(v.round_rest)} between rounds` : "";
       return `
       <div class="ex-head"><div class="main"><div class="name">${esc(x.name)}</div>
-        <div class="small muted">${v.rounds} rounds · ${v.work}s on / ${v.rest}s off · ${fmtClock(total)} total</div></div></div>
+        <div class="small muted">${v.rounds} round${v.rounds === 1 ? "" : "s"}${circuit ? ` of ${v.moves.length}` : ""} · ${v.work}s on / ${v.rest}s off${rr} · ${fmtClock(total)} total</div></div></div>
       <div class="iv-moves">${v.moves.map((m) => `<span>${esc(m)}</span>`).join("")}</div>
       ${done ? `<div class="done-line" style="margin-top:12px">${ICO.check}<span>Done</span></div>` : ""}
       <button class="btn ${done ? "ghost" : "primary"} block" data-iv="${i}" style="margin-top:12px">${ICO.play}${done ? "Do it again" : "Start intervals"}</button>`;
@@ -828,6 +833,10 @@ async function openSession(id) {
     toast("Deleted");
     go(back);
   });
+  // A workout that is one interval block: Start goes straight into the timer.
+  if (opts.autoStart && !w.completed_at && list.length === 1 && list[0].interval && !list[0].sets?.[0]?.done) {
+    app.querySelector('[data-iv="0"]')?.click();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -928,18 +937,43 @@ function stopRest() {
 }
 
 // ---------------------------------------------------------------------------
-// Interval timer: full screen, 10 s get-ready, then work / rest for each round
+// Interval timer: full screen, get-ready countdown, then work / rest through every round
 // ---------------------------------------------------------------------------
 const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, sec) % 60).padStart(2, "0")}`;
 
+// The timeline of an interval block. Circuit blocks (the builder's) go through every move once
+// per round, with a longer rest between rounds; older blocks count each work interval as a round.
+function ivPhases(v) {
+  const circuit = v.circuit === true;
+  const moves = v.moves?.length ? v.moves : ["Work"];
+  const phases = [{ kind: "prep", sec: Math.max(3, Number(v.prep) || 10), move: moves[0], round: 1, ex: 1 }];
+  if (circuit) {
+    const rr = v.round_rest ?? v.rest;
+    for (let r = 1; r <= v.rounds; r++) {
+      moves.forEach((m, e) => {
+        phases.push({ kind: "work", sec: v.work, move: m, round: r, ex: e + 1 });
+        const lastMove = e === moves.length - 1;
+        if (!lastMove && v.rest > 0) phases.push({ kind: "rest", sec: v.rest, move: moves[e + 1], round: r, ex: e + 2 });
+        if (lastMove && r < v.rounds && rr > 0) phases.push({ kind: "break", sec: rr, move: moves[0], round: r + 1, ex: 1 });
+      });
+    }
+  } else {
+    for (let r = 1; r <= v.rounds; r++) {
+      phases.push({ kind: "work", sec: v.work, move: moves[(r - 1) % moves.length], round: r });
+      if (r < v.rounds && v.rest > 0) phases.push({ kind: "rest", sec: v.rest, move: moves[r % moves.length], round: r + 1 });
+    }
+  }
+  const total = phases.slice(1).reduce((n, p) => n + p.sec, 0);
+  return { phases, total, circuit, moves };
+}
+// Browsers only allow sound after a tap, so get the audio going in the tap itself.
+function primeAudio() {
+  try { rest.audio ??= new (window.AudioContext || window.webkitAudioContext)(); rest.audio.resume(); } catch {}
+}
+
 async function runIntervals(x, onDone) {
   const v = x.interval;
-  // The phases in order: get ready, then work/rest per round (no rest after the last round).
-  const phases = [{ kind: "prep", sec: 10, move: v.moves[0], round: 1 }];
-  for (let r = 1; r <= v.rounds; r++) {
-    phases.push({ kind: "work", sec: v.work, move: v.moves[(r - 1) % v.moves.length], round: r });
-    if (r < v.rounds && v.rest > 0) phases.push({ kind: "rest", sec: v.rest, move: v.moves[r % v.moves.length], round: r + 1 });
-  }
+  const { phases, circuit, moves } = ivPhases(v);
   try { rest.audio ??= new (window.AudioContext || window.webkitAudioContext)(); rest.audio.resume(); } catch {}
   let lock = null;
   try { lock = await navigator.wakeLock?.request("screen"); } catch {}
@@ -974,7 +1008,7 @@ async function runIntervals(x, onDone) {
     try { lock?.release(); } catch {}
     if (completed) {
       el.className = "done";
-      el.innerHTML = `<div class="iv-phase">Done</div><div class="iv-time">${v.rounds}</div><div class="iv-move">rounds finished</div>
+      el.innerHTML = `<div class="iv-phase">Done</div><div class="iv-time">${v.rounds}</div><div class="iv-move">round${v.rounds === 1 ? "" : "s"} finished</div>
         <div class="iv-ctl"><button data-ivc="close" class="solid">Back to workout</button></div>`;
       beep(988, 0.5);
       try { navigator.vibrate?.([300, 120, 300]); } catch {}
@@ -994,11 +1028,13 @@ async function runIntervals(x, onDone) {
   const draw = () => {
     const p = phases[idx];
     const left = paused ?? Math.max(0, Math.ceil((end - Date.now()) / 1000));
-    el.className = p.kind + (paused != null ? " paused" : "");
-    $(".iv-phase", el).textContent = paused != null ? "Paused" : p.kind === "work" ? "Work" : p.kind === "rest" ? "Rest" : "Get ready";
+    el.className = (p.kind === "break" ? "rest" : p.kind) + (paused != null ? " paused" : "");
+    $(".iv-phase", el).textContent = paused != null ? "Paused" : { work: "Work", rest: "Rest", break: "Round break", prep: "Get ready" }[p.kind];
     $(".iv-time", el).textContent = fmtClock(left);
     $(".iv-move", el).textContent = p.kind === "work" ? p.move : `Next: ${p.move}`;
-    $(".iv-round", el).textContent = `Round ${p.round} of ${v.rounds}`;
+    $(".iv-round", el).textContent = circuit
+      ? (p.kind === "break" ? `Round ${p.round} of ${v.rounds} up next` : `Round ${p.round} of ${v.rounds} · Exercise ${p.ex} of ${moves.length}`)
+      : `Round ${p.round} of ${v.rounds}`;
     $(".iv-bar div", el).style.width = `${(1 - left / p.sec) * 100}%`;
     $('[data-ivc="pause"]', el).textContent = paused != null ? "Resume" : "Pause";
     if (paused == null) {
@@ -2348,7 +2384,7 @@ async function handleHash() {
 async function openCoachMode(view) {
   if (!isCoach) return;
   try {
-    const m = await import("./coach.js?v=14");
+    const m = await import("./coach.js?v=15");
     await m.openCoach({ db, user, esc, toast, ymd, api, view, exit: () => go(tab) });
   } catch (e) { toast("Couldn't open coach mode"); console.error(e); }
 }

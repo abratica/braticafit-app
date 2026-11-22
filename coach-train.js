@@ -42,8 +42,11 @@ function calcTargets(i) {
 function toBlocks(rows) {
   return (rows ?? []).map((x, i, all) => {
     if (x.interval) {
-      return { k: uid(), type: "iv", name: x.name || "Intervals", work: x.interval.work ?? 40, rest: x.interval.rest ?? 20,
-        rounds: x.interval.rounds ?? 8, moves: (x.interval.moves ?? []).join(", ") };
+      const v = x.interval, moves = v.moves ?? [];
+      // Older blocks counted every work interval as a round; the builder counts times through the list.
+      const rounds = v.circuit ? (v.rounds ?? 3) : Math.max(1, Math.ceil((v.rounds ?? 8) / Math.max(1, moves.length)));
+      return { k: uid(), type: "iv", name: x.name || "Intervals", work: v.work ?? 40, rest: v.rest ?? 20,
+        rounds, roundRest: v.round_rest ?? v.rest ?? 60, prep: v.prep ?? 10, moves: moves.join(", ") };
     }
     const sets = x.sets ?? [];
     const repsFromScheme = (x.scheme || "").split("×")[1]?.trim() ?? "";
@@ -60,8 +63,11 @@ function toRows(blocks) {
     if (b.type === "iv") {
       inRun = false;
       const moves = b.moves.split(",").map((m) => m.trim()).filter(Boolean);
-      out.push({ name: b.name || "Intervals", scheme: `${b.rounds} rounds · ${b.work}s on / ${b.rest}s off`,
-        interval: { work: Number(b.work) || 40, rest: Number(b.rest) || 0, rounds: Number(b.rounds) || 1, moves: moves.length ? moves : ["Work"] },
+      const num = (v, d) => (v === "" || v == null || isNaN(Number(v)) ? d : Math.max(0, Number(v)));
+      const rounds = Math.max(1, num(b.rounds, 1));
+      out.push({ name: b.name || "Intervals", scheme: `${rounds} round${rounds === 1 ? "" : "s"} · ${b.work}s on / ${b.rest}s off`,
+        interval: { work: Math.max(5, num(b.work, 40)), rest: num(b.rest, 0), rounds, moves: moves.length ? moves : ["Work"],
+                    round_rest: num(b.roundRest, num(b.rest, 0)), prep: Math.max(3, num(b.prep, 10)), circuit: true },
         sets: [{ reps: "", weight: "" }] });
       return;
     }
@@ -143,8 +149,10 @@ export function createTrain(ctx) {
             <div class="bb-r2">
               <label><span>Work (s)</span><input data-f="work" type="number" inputmode="numeric" value="${esc(x.work)}"></label>
               <label><span>Rest (s)</span><input data-f="rest" type="number" inputmode="numeric" value="${esc(x.rest)}"></label>
-              <label><span>Rounds</span><input data-f="rounds" type="number" inputmode="numeric" value="${esc(x.rounds)}"></label>
-              <label class="wide"><span>Moves, comma separated</span><input data-f="moves" value="${esc(x.moves)}" placeholder="Jumping jacks, Mountain climbers"></label>
+              <label><span>Rounds</span><input data-f="rounds" type="number" inputmode="numeric" value="${esc(x.rounds)}" title="Times through the list"></label>
+              <label><span>Round rest (s)</span><input data-f="roundRest" type="number" inputmode="numeric" value="${esc(x.roundRest)}"></label>
+              <label><span>Get ready (s)</span><input data-f="prep" type="number" inputmode="numeric" value="${esc(x.prep)}"></label>
+              <label class="wide"><span>Exercises, comma separated (in order)</span><input data-f="moves" value="${esc(x.moves)}" placeholder="Goblet squat, Push-up, Row"></label>
             </div>
           </div>
         </div>`;
@@ -227,7 +235,7 @@ export function createTrain(ctx) {
           <aside class="bld-side">
             ${b.kind === "written" ? `<h3>Outline</h3>
               <ol class="bld-outline">${b.blocks.map((x, i) => `<li>${labels[i] ? `<b>${labels[i]}</b> ` : ""}${esc(x.name || "Exercise")}
-                <span>${x.type === "iv" ? `${x.rounds} × ${x.work}/${x.rest}s` : `${x.sets} × ${esc(x.reps || "?")}${x.weight ? ` @ ${esc(x.weight)}` : ""}`}</span></li>`).join("") || "<li class='muted'>Nothing yet</li>"}</ol>
+                <span>${x.type === "iv" ? `${x.rounds} rounds · ${x.work}/${x.rest}s` : `${x.sets} × ${esc(x.reps || "?")}${x.weight ? ` @ ${esc(x.weight)}` : ""}`}</span></li>`).join("") || "<li class='muted'>Nothing yet</li>"}</ol>
               <p class="c-vm">${b.blocks.length} block${b.blocks.length === 1 ? "" : "s"} · ${nSets} working sets</p>` : ""}
             <label class="bld-f"><span>Coach note (shows at the top)</span><textarea data-b="note" rows="4" placeholder="Slow 3-second lowers today">${esc(b.note)}</textarea></label>
             <label class="bld-f"><span>Minutes (optional)</span><input data-b="duration_min" type="number" inputmode="numeric" value="${esc(b.duration_min)}"></label>
@@ -252,7 +260,7 @@ export function createTrain(ctx) {
       const t = e.target.closest("button");
       if (!t) return;
       if (t.dataset.add !== undefined) return addBlock(t.dataset.add, t.dataset.demo);
-      if (t.hasAttribute("data-add-iv")) { b.blocks.push({ k: uid(), type: "iv", name: "Intervals", work: 40, rest: 20, rounds: 8, moves: "" }); return draw(); }
+      if (t.hasAttribute("data-add-iv")) { b.blocks.push({ k: uid(), type: "iv", name: "Intervals", work: 30, rest: 30, rounds: 3, roundRest: 120, prep: 30, moves: "" }); return draw(); }
       if (t.dataset.rm) { b.blocks.splice(Number(t.dataset.rm), 1); return draw(); }
       if (t.dataset.up) return move(Number(t.dataset.up), Number(t.dataset.up) - 1);
       if (t.dataset.down) return move(Number(t.dataset.down), Number(t.dataset.down) + 1);
@@ -293,7 +301,7 @@ export function createTrain(ctx) {
           const labels = blockLabels(b.blocks);
           const ol = el.querySelector(".bld-outline");
           if (ol) ol.innerHTML = b.blocks.map((x, j) => `<li>${labels[j] ? `<b>${labels[j]}</b> ` : ""}${esc(x.name || "Exercise")}
-            <span>${x.type === "iv" ? `${x.rounds} × ${x.work}/${x.rest}s` : `${x.sets} × ${esc(x.reps || "?")}${x.weight ? ` @ ${esc(x.weight)}` : ""}`}</span></li>`).join("");
+            <span>${x.type === "iv" ? `${x.rounds} rounds · ${x.work}/${x.rest}s` : `${x.sets} × ${esc(x.reps || "?")}${x.weight ? ` @ ${esc(x.weight)}` : ""}`}</span></li>`).join("");
         }
         return;
       }
