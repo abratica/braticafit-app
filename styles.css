@@ -532,12 +532,14 @@ a.btn.primary { color: var(--accent-ink); }
    Same layout and wording as the default; only the look changes. Set per client by the coach.
    --------------------------------------------------------------------------- */
 :root[data-theme="clarity"] {
-  --bg: #F9F9F8; --card: #FFFFFF; --ink: #0F0F0E; --muted: #6B6B66; --line: #E8E8E4;
+  --bg: #F9F9F8; --card: #FFFFFF; --ink: #0F0F0E; --muted: #3D3D3A; --line: #E8E8E4;
   --accent: #2563EB; --accent-ink: #FFFFFF; --chip: #F1F1EE; --warn: #B45309; --good: #15803D;
   --display: Inter, system-ui, sans-serif; --serif: "Playfair Display", Georgia, serif;
   --texture: none; color-scheme: light;
 }
 [data-theme="clarity"] body { background-image: none; }
+/* Only the date at the top stays light gray; everything below uses the darker --muted. */
+[data-theme="clarity"] .sub { color: #6B6B66; }
 [data-theme="clarity"] .wordmark { height: 30px; width: auto; margin: 13px 0; }
 /* Titles in Playfair, sentence case */
 [data-theme="clarity"] h2, [data-theme="clarity"] .w-title, [data-theme="clarity"] .call-title, [data-theme="clarity"] .viewer-top b {
